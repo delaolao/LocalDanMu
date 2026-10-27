@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" />
+    <title>词云</title>
+    <link rel="stylesheet" href="cloud.css" />
+  </head>
+  <body>
+    <header class="hd">
+      <div class="hd-left">
+        <div class="mark" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="22" height="22">
+            <rect x="7" y="11" width="50" height="34" rx="11" fill="none" stroke="currentColor" stroke-width="3.8" />
+            <path d="M22 45 20 56l13-11" fill="none" stroke="currentColor" stroke-width="3.8" stroke-linejoin="round" />
+            <rect x="16" y="21" width="20" height="4.4" rx="2.2" fill="currentColor" />
+            <rect x="16" y="31" width="31" height="4.4" rx="2.2" fill="currentColor" opacity="0.72" />
+          </svg>
+        </div>
+        <div>
+          <h1>现场互动 · 词云</h1>
+          <p class="sub" id="sub">等大家发几个关键词</p>
+        </div>
+      </div>
+      <div class="hd-right">
+        <span class="chip" id="onlineChip">在线 0</span>
+        <span class="chip" id="totalChip">消息 0</span>
+        <span class="chip paused" id="pausedChip" hidden>已暂停</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="cloud-area">
+        <canvas id="cloud"></canvas>
+        <div class="empty" id="empty">扫大屏上的二维码，发两三个字<br />这里就会长出词云</div>
+      </section>
+
+      <aside class="feed-wrap">
+        <div class="feed-head">最近弹幕</div>
+        <div class="feed" id="feed"></div>
+      </aside>
+    </main>
+
+    <footer class="ft">
+      <span id="brandLine">培训弹幕</span>
+      <span class="dot">·</span>
+      <span>teacherGeng programs with DSH.</span>
+    </footer>
+
+    <script src="words.js"></script>
+    <script src="cloud.js"></script>
+  </body>
+</html>

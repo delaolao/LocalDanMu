@@ -1,0 +1,70 @@
+{
+  "name": "local-danmu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "线下培训弹幕互动平台（局域网自建版，数据不出本机）",
+  "main": "src/main/main.js",
+  "author": "LocalDanMu",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node scripts/smoke-test.js && node scripts/test-layout.js && node scripts/test-filter.js && node scripts/test-words.js",
+    "smoke": "electron . --smoke",
+    "dist": "electron-builder --win",
+    "dist:cn": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-win.ps1",
+    "pack": "electron-builder --win --dir"
+  },
+  "dependencies": {
+    "koffi": "^3.3.4",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.localdanmu.desktop",
+    "productName": "LocalDanMu",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "portable": {
+      "artifactName": "LocalDanMu-Portable-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "LocalDanMu-Setup-${version}.${ext}"
+    },
+    "asarUnpack": [
+      "**/node_modules/koffi/**"
+    ]
+  }
+}

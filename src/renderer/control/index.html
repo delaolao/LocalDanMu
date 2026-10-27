@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" />
+    <title>培训弹幕</title>
+    <link rel="stylesheet" href="control.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="24" height="24">
+            <rect x="7" y="11" width="50" height="34" rx="11" fill="none" stroke="currentColor" stroke-width="3.8" />
+            <path d="M22 45 20 56l13-11" fill="none" stroke="currentColor" stroke-width="3.8" stroke-linejoin="round" />
+            <rect x="16" y="21" width="20" height="4.4" rx="2.2" fill="currentColor" />
+            <rect x="16" y="31" width="31" height="4.4" rx="2.2" fill="currentColor" opacity="0.72" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-name-row">
+            <span class="brand-name">培训弹幕</span>
+            <span class="brand-version" id="versionChip">v 0.1.0</span>
+          </div>
+          <div class="brand-author">teacherGeng programs with DSH.</div>
+        </div>
+      </div>
+      <div class="winbtns">
+        <button id="minBtn" title="最小化">─</button>
+        <button id="closeBtn" title="隐藏到托盘">✕</button>
+      </div>
+    </header>
+
+    <div id="warnings" class="warnings"></div>
+
+    <main>
+      <section class="card qr-card">
+        <div class="qr-wrap"><img id="qr" alt="扫码进入" /></div>
+        <div class="url" id="url">正在启动…</div>
+        <div class="wifi-line" id="wifiLine" hidden>
+          <span>现场 WiFi</span><b id="wifiName">—</b><span id="wifiPwd">—</span>
+        </div>
+        <div class="row">
+          <button class="btn" id="copyBtn">复制链接</button>
+          <button class="btn accent" id="joinBtn">投屏引导页</button>
+        </div>
+      </section>
+
+      <section class="modes" role="tablist">
+        <button class="mode" id="modeScroll" data-mode="scroll" type="button">滚动弹幕</button>
+        <button class="mode" id="modeCloud" data-mode="cloud" type="button">词云弹幕</button>
+      </section>
+
+      <section class="stats">
+        <div class="stat"><b id="online">0</b><span>在线人数</span></div>
+        <div class="stat"><b id="total">0</b><span>已收到</span></div>
+        <div class="stat"><b id="room">—</b><span>房间号</span></div>
+      </section>
+
+      <section class="actions">
+        <button class="btn primary" id="pauseBtn">暂停弹幕</button>
+        <button class="btn" id="clearBtn">清屏</button>
+        <button class="btn danger" id="endBtn">结束培训</button>
+      </section>
+
+      <section class="card log-card">
+        <div class="log-head">
+          <span>最近弹幕</span>
+          <span class="log-count" id="logCount">0 条</span>
+        </div>
+        <div class="log-list" id="logList">
+          <div class="log-empty">还没有人发弹幕</div>
+        </div>
+      </section>
+
+      <details class="panel" id="settings">
+        <summary>设置与网络</summary>
+
+        <div class="field">
+          <label>界面主题</label>
+          <select id="themeSel">
+            <option value="system">跟随系统</option>
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>投影显示器</label>
+          <select id="displaySel"></select>
+        </div>
+
+        <div class="field">
+          <label>网卡（手机能连上的那个）</label>
+          <div class="inline">
+            <select id="nicSel"></select>
+            <button class="btn small" id="refreshBtn">重新检测</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>现场 WiFi（显示在投屏引导页）</label>
+          <input type="text" id="ssidInput" maxlength="32" placeholder="WiFi 名称，例如 Training-5G" autocomplete="off" />
+          <input type="text" id="pwdInput" maxlength="64" placeholder="WiFi 密码，留空则不显示" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label>滚动速度 <span class="val" id="speedVal">8</span></label>
+          <input type="range" id="speedRange" min="4" max="30" step="1" />
+          <div class="scale"><span>慢</span><span>快</span></div>
+        </div>
+
+        <div class="field">
+          <label>字号 <span class="val" id="fontVal">38</span></label>
+          <input type="range" id="fontRange" min="20" max="72" step="2" />
+        </div>
+
+        <div class="field">
+          <label>显示区域</label>
+          <select id="areaSel">
+            <option value="full">全屏</option>
+            <option value="top">上部（避开主要版面）</option>
+            <option value="middle">中部</option>
+            <option value="bottom">下部（字幕区）</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>每人发送间隔</label>
+          <select id="intervalSel">
+            <option value="3">3 秒</option>
+            <option value="5">5 秒</option>
+            <option value="8">8 秒</option>
+            <option value="10">10 秒</option>
+            <option value="15">15 秒</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>弹幕透明度 <span class="val" id="opacityVal">100</span></label>
+          <input type="range" id="opacityRange" min="30" max="100" step="5" />
+        </div>
+
+        <div class="field">
+          <label>关键词过滤 <span class="val" id="wordCount">—</span></label>
+          <select id="filterSel">
+            <option value="block">命中即拦截</option>
+            <option value="mark">仅标记（照常上屏）</option>
+            <option value="off">关闭过滤</option>
+          </select>
+          <textarea id="wordsInput" rows="3" maxlength="6000" placeholder="自定义词，一行一个"></textarea>
+          <div class="inline">
+            <button class="btn small" id="importWordsBtn">导入词表 txt</button>
+            <button class="btn small" id="saveWordsBtn">保存词表</button>
+          </div>
+          <p class="hint-text">内置：手机号 / QQ / 微信 / 网址 / 广告话术 + 通用脏话。自定义词只存本机。</p>
+        </div>
+
+        <div class="field row">
+          <button class="btn small" id="exportBtn">导出本次记录</button>
+          <button class="btn small" id="netSettingsBtn">打开网络设置</button>
+        </div>
+      </details>
+
+      <p class="tip-line">手机打不开？先确认同一 WiFi，再把网络设为「专用」，场地 WiFi 也可能开了设备隔离</p>
+    </main>
+
+    <footer class="foot">
+      <span>Ctrl+Alt 空格 暂停 · X 清屏 · J 引导页 · K 词云 · G 关大图 · M 面板</span>
+    </footer>
+
+    <div class="ended" id="ended" hidden>
+      <h2>本次培训已结束</h2>
+      <p>内存中的消息已全部释放，未导出的内容无法找回。</p>
+      <button class="btn primary" id="restartBtn">开始新一场</button>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script src="control.js"></script>
+  </body>
+</html>

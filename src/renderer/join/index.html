@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" />
+    <title>投屏引导页</title>
+    <link rel="stylesheet" href="join.css" />
+  </head>
+  <body>
+    <button class="close" id="closeBtn" title="关闭（Esc）">✕</button>
+
+    <main class="wrap">
+      <section class="left">
+        <div class="qr-box"><img id="qr" alt="扫码进入" /></div>
+        <div class="scan-hint">微信扫一扫 · 无需注册</div>
+      </section>
+
+      <section class="right">
+        <h1>欢迎参与现场互动</h1>
+        <p class="lead">扫码打开页面，发送文字或图片，内容会实时显示在大屏上。</p>
+
+        <div class="url" id="url">—</div>
+
+        <div class="wifi" id="wifi" hidden>
+          <div class="wifi-title">现场 WiFi</div>
+          <div class="wifi-row">
+            <span class="k">名称</span>
+            <span class="v" id="ssid">—</span>
+          </div>
+          <div class="wifi-row" id="pwdRow">
+            <span class="k">密码</span>
+            <span class="v mono" id="pwd">—</span>
+          </div>
+        </div>
+
+        <div class="foot">
+          <span>房间里已有 <b id="online">0</b> 人在线</span>
+          <span class="sep">·</span>
+          <span>按 Esc 关闭本页</span>
+        </div>
+
+        <div class="brandline" id="brandLine">培训弹幕 v0.1.0 · teacherGeng programs with DSH.</div>
+      </section>
+    </main>
+
+    <script src="join.js"></script>
+  </body>
+</html>

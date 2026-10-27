@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="format-detection" content="telephone=no,date=no,address=no,email=no" />
+    <meta name="theme-color" content="#0f1117" />
+    <title>培训互动</title>
+    <script src="/assets/theme-boot.js?v=1.0.1"></script>
+    <link rel="stylesheet" href="/assets/style.css?v=1.0.1" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="bar">
+        <div class="status-wrap">
+          <span class="dot" id="dot"></span>
+          <span class="title" id="status">连接中…</span>
+        </div>
+        <button class="theme-btn" id="themeBtn" type="button" title="切换深浅色">◐</button>
+      </header>
+
+      <main class="stage">
+        <div class="welcome">
+          <div class="bubble">💬</div>
+          <p>说说你的想法<br />会实时出现在现场大屏上</p>
+        </div>
+
+        <div class="hint" id="hint">每人每 5 秒可发 1 条</div>
+
+        <div class="colors" id="colors" role="group" aria-label="弹幕颜色">
+          <button class="swatch auto active" type="button" data-color="auto">随机</button>
+          <button class="swatch" type="button" data-color="#ffffff" style="background: #ffffff" aria-label="白色"></button>
+          <button class="swatch" type="button" data-color="#ffe066" style="background: #ffe066" aria-label="黄色"></button>
+          <button class="swatch" type="button" data-color="#7ee787" style="background: #7ee787" aria-label="绿色"></button>
+          <button class="swatch" type="button" data-color="#7cc4ff" style="background: #7cc4ff" aria-label="蓝色"></button>
+          <button class="swatch" type="button" data-color="#ffb4d1" style="background: #ffb4d1" aria-label="粉色"></button>
+          <button class="swatch" type="button" data-color="#ffa94d" style="background: #ffa94d" aria-label="橙色"></button>
+          <button class="swatch" type="button" data-color="#b197fc" style="background: #b197fc" aria-label="紫色"></button>
+          <button class="swatch" type="button" data-color="#66e3d0" style="background: #66e3d0" aria-label="青色"></button>
+        </div>
+
+        <div class="editor">
+          <textarea
+            id="input"
+            rows="3"
+            maxlength="300"
+            placeholder="输入你想说的话…"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+          ></textarea>
+          <div class="meta">
+            <span id="counter">0/100</span>
+            <span class="cool" id="cool"></span>
+          </div>
+        </div>
+
+        <div class="row">
+          <button class="btn ghost" id="imgBtn" type="button">图片</button>
+          <input class="file" id="file" type="file" accept="image/*" />
+          <button class="btn primary" id="sendBtn" type="button">发送</button>
+        </div>
+
+        <p class="tiny">消息只会显示在现场大屏上，不经过任何第三方服务器。</p>
+      </main>
+    </div>
+
+    <div class="ended" id="ended" hidden>
+      <h2>培训已结束</h2>
+      <p>感谢参与，页面可以关闭了。</p>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script src="/assets/app.js?v=1.0.1"></script>
+  </body>
+</html>
