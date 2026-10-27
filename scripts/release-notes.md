@@ -15,6 +15,16 @@
 
 下载 `LocalDanMu-Setup-0.1.0.exe` 双击安装。未做代码签名，SmartScreen 提示时选「更多信息 → 仍要运行」。
 
+三种打包形态，功能完全一样，按需选择：
+
+| 文件 | 形态 | 说明 |
+| --- | --- | --- |
+| `LocalDanMu-Setup-0.1.0.exe` | 安装版 | 双击安装，开始菜单有快捷方式 |
+| `LocalDanMu-Portable-0.1.0.exe` | 单文件便携版 | 一个 exe，双击即用，不写注册表；启动时会解压到临时目录，首次稍慢 |
+| `LocalDanMu-0.1.0-win-x64.zip` | 绿色解压版 | 解压到任意文件夹，双击 `LocalDanMu.exe`；启动最快，推荐放 U 盘或临时电脑 |
+
+> 绿色版目录里的 `portable.txt` 是便携标记：程序会把 `settings.json` 写在 exe 旁边，不往 `%APPDATA%` 塞东西；整个文件夹拷走即可迁移。
+
 ### 首次使用
 
 1. 手机与电脑连同一个 WiFi

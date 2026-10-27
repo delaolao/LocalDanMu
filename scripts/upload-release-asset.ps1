@@ -1,11 +1,18 @@
-# 用 curl 上传大文件（PowerShell 的 Invoke-RestMethod 在 100MB+ 上会断）
+# 上传 Release 附件（安装版 / 便携版 / 绿色 zip）
+# 大文件用 curl：PowerShell 的 Invoke-RestMethod 在 100MB+ 会断，且 schannel 需要 --ssl-no-revoke
 $ErrorActionPreference = 'Stop'
 $owner = 'delaolao'
 $repo = 'LocalDanMu'
 $tag = 'v0.1.0'
-$assetName = 'LocalDanMu-Setup-0.1.0.exe'
-$assetPath = Join-Path (Split-Path $PSScriptRoot -Parent) "dist\$assetName"
 
+$root = Split-Path $PSScriptRoot -Parent
+$assets = @(
+  'LocalDanMu-Setup-0.1.0.exe',
+  'LocalDanMu-Portable-0.1.0.exe',
+  'LocalDanMu-0.1.0-win-x64.zip'
+)
+
+# 取 token（只写进临时 curl 配置，命令行里不出现）
 $f = Join-Path $env:TEMP 'cred-in.txt'
 "protocol=https`nhost=github.com`n`n" | Set-Content $f -NoNewline -Encoding ASCII
 $out = cmd /c "git credential fill < `"$f`"" 2>&1
@@ -21,23 +28,7 @@ $headers = @{
 }
 
 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/$repo/releases/tags/$tag" -Headers $headers
-$assetList = Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/$repo/releases/$($release.id)/assets" -Headers $headers
 
-# 清掉之前失败留下的同名残片
-foreach ($a in @($assetList)) {
-  if ($a.name -eq $assetName -and $a.state -ne 'uploaded') {
-    Write-Output "删除残片: $($a.name) state=$($a.state)"
-    Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/$repo/releases/assets/$($a.id)" -Headers $headers -Method Delete
-  }
-  if ($a.name -eq $assetName -and $a.state -eq 'uploaded') {
-    Write-Output "已存在且完整: $($a.browser_download_url)"
-    exit 0
-  }
-}
-
-if (-not (Test-Path $assetPath)) { throw "找不到安装包: $assetPath" }
-
-# token 只写进临时 curl 配置，命令行里不出现
 $cfg = Join-Path $env:TEMP 'github-upload.cfg'
 @(
   "header = `"Authorization: Bearer $token`"",
@@ -46,11 +37,38 @@ $cfg = Join-Path $env:TEMP 'github-upload.cfg'
 ) | Set-Content $cfg -Encoding ASCII
 
 try {
-  $url = "https://uploads.github.com/repos/$owner/$repo/releases/$($release.id)/assets?name=$assetName"
-  $sizeMB = [math]::Round((Get-Item $assetPath).Length / 1MB, 1)
-  Write-Output "上传 $sizeMB MB -> $url"
-  $resp = & curl.exe -sS --ssl-no-revoke --retry 3 --retry-delay 5 --max-time 1800 -K $cfg -X POST --data-binary "@$assetPath" $url
-  Write-Output $resp
+  foreach ($name in $assets) {
+    $path = Join-Path $root "dist\$name"
+    $current = @(Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/$repo/releases/$($release.id)/assets" -Headers $headers) |
+      Where-Object { $_.name -eq $name }
+
+    if ($current -and $current.state -eq 'uploaded') {
+      Write-Output "跳过（已上传）: $name  $([math]::Round($current.size/1MB,1)) MB"
+      continue
+    }
+    if ($current) {
+      Write-Output "清理残片: $name state=$($current.state)"
+      Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/$repo/releases/assets/$($current.id)" -Headers $headers -Method Delete
+    }
+    if (-not (Test-Path $path)) { Write-Output "缺失，跳过: $path"; continue }
+
+    $sizeMB = [math]::Round((Get-Item $path).Length / 1MB, 1)
+    $url = "https://uploads.github.com/repos/$owner/$repo/releases/$($release.id)/assets?name=$name"
+    Write-Output "上传 $name  $sizeMB MB ..."
+    $resp = & curl.exe -sS --ssl-no-revoke --retry 3 --retry-delay 5 --max-time 1800 -K $cfg -X POST --data-binary "@$path" $url
+    if ($LASTEXITCODE -ne 0) { Write-Output "curl 失败: $resp"; continue }
+    $id = ($resp | ConvertFrom-Json).id
+    if ($id) {
+      $check = Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/$repo/releases/assets/$id" -Headers $headers
+      Write-Output "  完成: $($check.state)  $([math]::Round($check.size/1MB,1)) MB"
+    } else {
+      Write-Output "  未知结果: $resp"
+    }
+  }
 } finally {
   Remove-Item $cfg -Force -ErrorAction SilentlyContinue
 }
+
+$final = Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/$repo/releases/$($release.id)/assets" -Headers $headers
+Write-Output '--- 当前附件'
+$final | Select-Object name, @{n = 'MB'; e = { [math]::Round($_.size / 1MB, 1) } }, state | Format-Table -AutoSize
