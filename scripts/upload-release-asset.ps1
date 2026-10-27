@@ -3,13 +3,14 @@
 $ErrorActionPreference = 'Stop'
 $owner = 'delaolao'
 $repo = 'LocalDanMu'
-$tag = 'v0.1.0'
 
 $root = Split-Path $PSScriptRoot -Parent
+$version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
+$tag = "v$version"
 $assets = @(
-  'LocalDanMu-Setup-0.1.0.exe',
-  'LocalDanMu-Portable-0.1.0.exe',
-  'LocalDanMu-0.1.0-win-x64.zip'
+  "LocalDanMu-Setup-$version.exe",
+  "LocalDanMu-Portable-$version.exe",
+  "LocalDanMu-$version-win-x64.zip"
 )
 
 # 取 token（只写进临时 curl 配置，命令行里不出现）

@@ -20,5 +20,9 @@ contextBridge.exposeInMainWorld('dm', {
   onCursor: (callback) => {
     ipcRenderer.on('dm:cursor', (_event, point) => callback(point));
   },
+  /** 主进程轮询到鼠标左键按下（页面收不到 click 时兜底） */
+  onClick: (callback) => {
+    ipcRenderer.on('dm:click', (_event, point) => callback(point));
+  },
   ready: () => ipcRenderer.send('dm:ready')
 });

@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 创建 / 更新 GitHub Release（文案取自 scripts/release-notes.md）
@@ -7,7 +7,7 @@
  * 这里用 Node 拼 UTF-8，绕开这个问题。
  *
  * 用法：
- *   node scripts/publish-release.js            # 用 package.json 的版本，tag v0.1.0
+ *   node scripts/publish-release.js            # 用 package.json 的版本，tag v<版本号>
  *   node scripts/publish-release.js v0.2.0     # 指定 tag
  *
  * 安装包上传见 scripts/upload-release-asset.ps1（大文件用 curl 更稳）。

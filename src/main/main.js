@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /**
  * 主进程
@@ -32,7 +32,7 @@ const network = require('./network');
 const { createBridge } = require('./server');
 const { createStore } = require('./store');
 const { createFilter } = require('./filter');
-const { forceTop } = require('./topmost');
+const { forceTop, isLeftButtonDown } = require('./topmost');
 
 const APP_DIR = path.join(__dirname, '..', '..');
 const WEB_DIR = path.join(APP_DIR, 'src', 'web');
@@ -341,7 +341,8 @@ function bootstrap() {
     history.length = 0;
 
     const wanted = await pickPort(8080);
-    const token = randomToken(8);
+    // 开发调试可用 LDM_TOKEN 固定房间号；打包后忽略，避免被误用
+    const token = (!app.isPackaged && process.env.LDM_TOKEN) || randomToken(8);
     const picked = await network.pick(store.get().preferredIp);
     const ip = picked.address || '127.0.0.1';
 
@@ -855,19 +856,33 @@ function bootstrap() {
 
   function startCursorWatch() {
     if (cursorTimer) return;
+    let wasDown = false;
     cursorTimer = setInterval(() => {
+      // 按键状态不受窗口可见性影响，先取，避免漏掉按下边沿
+      const down = isLeftButtonDown();
+      const pressed = down && !wasDown;
+      wasDown = down;
+
       if (!overlayWin || overlayWin.isDestroyed() || !overlayWin.isVisible()) return;
       if (store.get().mode !== 'scroll') return;
       const point = screen.getCursorScreenPoint();
       const bounds = overlayWin.getBounds();
       const x = point.x - bounds.x;
       const y = point.y - bounds.y;
-      if (x === lastCursor.x && y === lastCursor.y) return;
-      lastCursor = { x, y };
-      try {
-        overlayWin.webContents.send('dm:cursor', { x, y });
-      } catch (_) {
-        /* ignore */
+      if (x !== lastCursor.x || y !== lastCursor.y) {
+        lastCursor = { x, y };
+        try {
+          overlayWin.webContents.send('dm:cursor', { x, y });
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      if (pressed) {
+        try {
+          overlayWin.webContents.send('dm:click', { x, y });
+        } catch (_) {
+          /* ignore */
+        }
       }
     }, 33);
   }

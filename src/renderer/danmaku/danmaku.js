@@ -447,15 +447,31 @@
     setHoverTarget(null);
   });
 
-  window.addEventListener('click', (event) => {
+  // 点击处理：DOM 的 click 和主进程的按键轮询都会进来，用时间戳去重
+  let lastClickHandledAt = 0;
+  function handleClick(x, y) {
+    const now = performance.now();
+    if (now - lastClickHandledAt < 180) return;
+    lastClickHandledAt = now;
     if (modalItem) {
       // 双击的第二次点击会立刻把大图关掉，看起来就像"没打开"，这里挡一下
-      if (performance.now() - modalOpenedAt < 550) return;
+      if (now - modalOpenedAt < 550) return;
       closeModal();
       return;
     }
-    const hit = imageAt(event.clientX, event.clientY, 8);
+    const hit = imageAt(x, y, 8);
     if (hit) openModal(hit);
+  }
+
+  window.addEventListener('click', (event) => {
+    handleClick(event.clientX, event.clientY);
+  });
+
+  // 主进程轮询左键按下：透明窗口在“穿透 ↔ 接管”来回切之后，
+  // Chromium 偶尔不再派发 click（实测），这条是兜底路径。
+  window.dm.onClick((point) => {
+    if (!point) return;
+    handleClick(point.x, point.y);
   });
 
   resize();

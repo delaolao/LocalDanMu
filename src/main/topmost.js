@@ -17,10 +17,11 @@ const SWP_NOACTIVATE = 0x0010;
 const HWND_TOPMOST = -1;
 
 let setWindowPos = null;
+let getAsyncKeyState = null;
 let loadTried = false;
 
 function load() {
-  if (setWindowPos || loadTried) return setWindowPos;
+  if ((setWindowPos && getAsyncKeyState) || loadTried) return;
   loadTried = true;
   try {
     // eslint-disable-next-line global-require
@@ -29,10 +30,10 @@ function load() {
     setWindowPos = user32.func(
       'bool __stdcall SetWindowPos(intptr_t hWnd, intptr_t hWndInsertAfter, int x, int y, int cx, int cy, uint32_t uFlags)'
     );
+    getAsyncKeyState = user32.func('int16 __stdcall GetAsyncKeyState(int vKey)');
   } catch (err) {
     console.error('[topmost] koffi 不可用，退回 Electron 置顶：', err && err.message);
   }
-  return setWindowPos;
 }
 
 function handleOf(win) {
@@ -43,13 +44,28 @@ function handleOf(win) {
 /** 把窗口强制顶到所有置顶窗口之上（不抢焦点、不改尺寸位置） */
 function forceTop(win) {
   if (!win || win.isDestroyed() || !win.isVisible()) return false;
-  const fn = load();
-  if (!fn) return false;
+  load();
+  if (!setWindowPos) return false;
   try {
-    return fn(handleOf(win), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+    return setWindowPos(handleOf(win), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
   } catch (err) {
     return false;
   }
 }
 
-module.exports = { forceTop, handleOf };
+/**
+ * 鼠标左键当前是否按下。
+ * 用轮询而不是 DOM click：Windows 上透明置顶窗口在“穿透 ↔ 接管”来回切之后，
+ * Chromium 偶尔不再把点击派发给页面（实测），轮询按键状态更可靠。
+ */
+function isLeftButtonDown() {
+  load();
+  if (!getAsyncKeyState) return false;
+  try {
+    return (getAsyncKeyState(0x01) & 0x8000) !== 0;
+  } catch (err) {
+    return false;
+  }
+}
+
+module.exports = { forceTop, handleOf, isLeftButtonDown };
