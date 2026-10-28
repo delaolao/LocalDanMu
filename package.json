@@ -13,7 +13,8 @@
     "smoke": "electron . --smoke",
     "dist": "electron-builder --win",
     "dist:cn": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-win.ps1",
-    "pack": "electron-builder --win --dir"
+    "pack": "electron-builder --win --dir",
+    "docs:pdf": "electron scripts/md-to-pdf.js docs/architecture.md docs/architecture.pdf"
   },
   "dependencies": {
     "koffi": "^3.3.4",
@@ -22,7 +23,8 @@
   },
   "devDependencies": {
     "electron": "^45.0.0",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "marked": "^18.1.2"
   },
   "build": {
     "appId": "com.localdanmu.desktop",
