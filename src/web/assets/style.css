@@ -158,8 +158,38 @@ body {
   gap: 10px;
 }
 
-.welcome {
+/* ------------------------------------------------------------ 现场弹幕流 */
+
+.feed {
+  position: relative;
   flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.feed-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 4px 2px 4px;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feed-list::-webkit-scrollbar {
+  display: none;
+}
+
+.feed-empty {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -167,9 +197,15 @@ body {
   gap: 10px;
   color: var(--welcome);
   text-align: center;
+  pointer-events: none;
 }
 
-.welcome .bubble {
+.feed-empty[hidden],
+.feed-new[hidden] {
+  display: none !important;
+}
+
+.feed-empty .bubble {
   width: 62px;
   height: 62px;
   border-radius: 50%;
@@ -180,10 +216,96 @@ body {
   font-size: 28px;
 }
 
-.welcome p {
+.feed-empty p {
   margin: 0;
   font-size: 13px;
   line-height: 1.7;
+}
+
+.msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  animation: msg-in 0.18s ease-out;
+}
+
+/* 消息贴底排（像聊天软件那样），内容超出后正常滚动。
+   用 margin-top:auto 而不是 justify-content:flex-end，避免溢出时顶部被裁掉。 */
+.msg:first-child {
+  margin-top: auto;
+}
+
+.msg.mine {
+  justify-content: flex-end;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.msg-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 11px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.msg.mine .msg-dot {
+  background: var(--accent);
+}
+
+.msg-bubble {
+  max-width: 84%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.45;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.msg.mine .msg-bubble {
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(15, 159, 120, 0.1));
+}
+
+.msg-bubble.is-image {
+  color: var(--muted);
+  font-size: 13.5px;
+  letter-spacing: 0.02em;
+}
+
+.msg-bubble.is-image::before {
+  content: "🖼 ";
+}
+
+.feed-new {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
 }
 
 .hint {

@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -9,8 +9,8 @@
     <meta name="format-detection" content="telephone=no,date=no,address=no,email=no" />
     <meta name="theme-color" content="#0f1117" />
     <title>培训互动</title>
-    <script src="/assets/theme-boot.js?v=1.0.1"></script>
-    <link rel="stylesheet" href="/assets/style.css?v=1.0.1" />
+    <script src="/assets/theme-boot.js?v=0.1.3"></script>
+    <link rel="stylesheet" href="/assets/style.css?v=0.1.3" />
   </head>
   <body>
     <div class="app" id="app">
@@ -23,10 +23,14 @@
       </header>
 
       <main class="stage">
-        <div class="welcome">
-          <div class="bubble">💬</div>
-          <p>说说你的想法<br />会实时出现在现场大屏上</p>
-        </div>
+        <section class="feed" id="feed" aria-label="现场弹幕">
+          <ul class="feed-list" id="feedList"></ul>
+          <div class="feed-empty" id="feedEmpty">
+            <div class="bubble">💬</div>
+            <p>说说你的想法<br />会实时出现在现场大屏上</p>
+          </div>
+          <button class="feed-new" id="feedNew" type="button" hidden></button>
+        </section>
 
         <div class="hint" id="hint">每人每 5 秒可发 1 条</div>
 
@@ -64,7 +68,7 @@
           <button class="btn primary" id="sendBtn" type="button">发送</button>
         </div>
 
-        <p class="tiny">消息只会显示在现场大屏上，不经过任何第三方服务器。</p>
+        <p class="tiny">消息只在现场局域网内传递，不经过任何第三方服务器。</p>
       </main>
     </div>
 
@@ -75,6 +79,6 @@
 
     <div class="toast" id="toast" hidden></div>
 
-    <script src="/assets/app.js?v=1.0.1"></script>
+    <script src="/assets/app.js?v=0.1.3"></script>
   </body>
 </html>

@@ -98,8 +98,118 @@
     file: $('file'),
     toast: $('toast'),
     ended: $('ended'),
-    theme: $('themeBtn')
+    theme: $('themeBtn'),
+    feedList: $('feedList'),
+    feedEmpty: $('feedEmpty'),
+    feedNew: $('feedNew')
   };
+
+  /* -------------------------------------------------------- 现场弹幕流 */
+
+  var FEED_MAX = 40; // DOM 节点上限，超了就丢最老的
+  var feedNewCount = 0;
+  var feedAtBottom = true;
+  var feedSeen = []; // 已渲染过的 seq，重连时 hello.recent 会重复下发
+
+  function markFeedSeen(seq) {
+    if (!seq) return true;
+    if (feedSeen.indexOf(seq) >= 0) return false;
+    feedSeen.push(seq);
+    if (feedSeen.length > 80) feedSeen.shift();
+    return true;
+  }
+
+  function feedItemNode(brief) {
+    var mine = Boolean(brief.clientId && CID && brief.clientId === CID);
+    var li = document.createElement('li');
+    li.className = 'msg' + (mine ? ' mine' : '');
+
+    var dot = document.createElement('span');
+    dot.className = 'msg-dot';
+    if (brief.kind === 'text' && brief.color) dot.style.background = brief.color;
+
+    var bubble = document.createElement('div');
+    bubble.className = 'msg-bubble';
+    if (brief.kind === 'image') {
+      bubble.className += ' is-image';
+      bubble.textContent = '图片';
+    } else {
+      bubble.textContent = String(brief.text || '');
+    }
+
+    // 自己的消息靠右，别人的靠左，和常见聊天界面一致
+    if (mine) {
+      li.appendChild(bubble);
+      li.appendChild(dot);
+    } else {
+      li.appendChild(dot);
+      li.appendChild(bubble);
+    }
+    return li;
+  }
+
+  function feedToEnd() {
+    if (!els.feedList) return;
+    els.feedList.scrollTop = els.feedList.scrollHeight;
+    feedAtBottom = true;
+    feedNewCount = 0;
+    if (els.feedNew) els.feedNew.hidden = true;
+  }
+
+  function paintFeedNew() {
+    if (!els.feedNew) return;
+    if (feedNewCount <= 0) {
+      els.feedNew.hidden = true;
+      return;
+    }
+    els.feedNew.hidden = false;
+    els.feedNew.textContent = '↓ ' + feedNewCount + ' 条新消息';
+  }
+
+  function addFeedItem(brief) {
+    if (!els.feedList || !brief) return;
+    if (!markFeedSeen(brief.seq)) return;
+    els.feedList.appendChild(feedItemNode(brief));
+    while (els.feedList.children.length > FEED_MAX) {
+      els.feedList.removeChild(els.feedList.firstChild);
+    }
+    if (els.feedEmpty) els.feedEmpty.hidden = true;
+
+    if (feedAtBottom) {
+      // 只有原本停在底部才自动滚，避免打断正在翻历史的人
+      window.requestAnimationFrame(function () {
+        if (els.feedList) els.feedList.scrollTop = els.feedList.scrollHeight;
+      });
+    } else {
+      feedNewCount += 1;
+      paintFeedNew();
+    }
+  }
+
+  function renderFeedRecent(list) {
+    if (!els.feedList || !list || !list.length) return;
+    for (var i = 0; i < list.length; i += 1) {
+      if (!markFeedSeen(list[i].seq)) continue;
+      els.feedList.appendChild(feedItemNode(list[i]));
+    }
+    while (els.feedList.children.length > FEED_MAX) {
+      els.feedList.removeChild(els.feedList.firstChild);
+    }
+    if (els.feedEmpty) els.feedEmpty.hidden = true;
+    feedAtBottom = true;
+    window.requestAnimationFrame(feedToEnd);
+  }
+
+  function onFeedScroll() {
+    if (!els.feedList) return;
+    var box = els.feedList;
+    var atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+    feedAtBottom = atBottom;
+    if (atBottom) {
+      feedNewCount = 0;
+      if (els.feedNew) els.feedNew.hidden = true;
+    }
+  }
 
   var state = {
     connected: false,
@@ -274,7 +384,12 @@
       }
       state.intervalSec = Number(msg.intervalSec) || 5;
       state.paused = Boolean(msg.paused);
+      if (msg.recent && msg.recent.length) renderFeedRecent(msg.recent);
       updateHint();
+      return;
+    }
+    if (msg.type === 'item') {
+      addFeedItem(msg);
       return;
     }
     if (msg.type === 'config') {
@@ -586,6 +701,13 @@
   updateCounter();
   updateHint();
   updateSendButton();
+
+  if (els.feedList) els.feedList.addEventListener('scroll', onFeedScroll, { passive: true });
+  if (els.feedNew) els.feedNew.addEventListener('click', feedToEnd);
+  // 切回前台时，如果原本停在底部就把攒下的新消息补上
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && feedAtBottom) feedToEnd();
+  });
 
   if (els.theme) els.theme.addEventListener('click', cycleTheme);
   if (window.matchMedia) {

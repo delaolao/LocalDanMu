@@ -100,6 +100,23 @@ function createBridge(options) {
   let globalBucket = { tokens: 12, last: Date.now() };
   let closed = false;
 
+  // 观众端「现场流」用的最近消息（只存轻量副本，图片不存原图）
+  const RECENT_MAX = 24;
+  const recentItems = [];
+
+  function broadcastRaw(obj) {
+    const data = JSON.stringify(obj);
+    for (const ws of wss.clients) {
+      if (ws.readyState === ws.OPEN) {
+        try {
+          ws.send(data);
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
+  }
+
   /* ------------------------------------------------------------------ HTTP */
 
   function baseHeaders(extra) {
@@ -261,6 +278,8 @@ h1{font-size:20px;margin:0 0 12px}p{color:#98a0b0;margin:0;max-width:22em}</styl
       proto: 1, // 协议版本：手机端缓存了旧页面时用来提示刷新
       intervalSec: Number(getConfig().intervalSec) || 5,
       paused: Boolean(getConfig().paused),
+      // 新进来的观众先看到最近几条，避免一片空白
+      recent: recentItems.slice(-12),
       serverTs: Date.now()
     });
 
@@ -335,6 +354,20 @@ h1{font-size:20px;margin:0 0 12px}p{color:#98a0b0;margin:0;max-width:22em}</styl
       };
 
       ack(ws, msgId, 'ok', { seq, retryAfter: interval });
+
+      // 广播给所有观众端：文本带正文，图片只给占位（不把原图推给所有人）
+      const brief = {
+        seq,
+        kind: verified.contentType === 'image' ? 'image' : 'text',
+        text: verified.contentType === 'text' ? verified.payload : '',
+        color: verified.color || null,
+        clientId: out.clientId,
+        ts: now
+      };
+      recentItems.push(brief);
+      if (recentItems.length > RECENT_MAX) recentItems.shift();
+      broadcastRaw({ type: 'item', ...brief });
+
       try {
         onMessage(out);
       } catch (err) {
@@ -425,16 +458,7 @@ h1{font-size:20px;margin:0 0 12px}p{color:#98a0b0;margin:0;max-width:22em}</styl
     },
 
     broadcast(obj) {
-      const data = JSON.stringify(obj);
-      for (const ws of wss.clients) {
-        if (ws.readyState === ws.OPEN) {
-          try {
-            ws.send(data);
-          } catch (_) {
-            /* ignore */
-          }
-        }
-      }
+      broadcastRaw(obj);
     },
 
     online() {

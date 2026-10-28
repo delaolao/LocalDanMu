@@ -1727,7 +1727,13 @@ function bootstrap() {
           counter: document.getElementById('counter').textContent,
           hint: document.getElementById('hint').textContent,
           sendLabel: document.getElementById('sendBtn').textContent,
-          ended: !document.getElementById('ended').hidden
+          ended: !document.getElementById('ended').hidden,
+          feedCount: document.querySelectorAll('#feedList .msg').length,
+          feedEmptyHidden: document.getElementById('feedEmpty').hidden,
+          feedLast: (function () {
+            const last = document.querySelector('#feedList .msg:last-child .msg-bubble');
+            return last ? last.textContent : '';
+          })()
         }))()`);
 
         viewer.showInactive();
