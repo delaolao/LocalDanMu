@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * 观众端「现场流」观感验证：
  * 1) 开几个 WS 客户端发若干条（含一条图片）
@@ -59,17 +59,24 @@ app.whenReady().then(async () => {
     ['同意楼上，这块确实容易踩坑', '#7ee787', 'c4'],
     ['老师语速有点快，跟不上了', '#ffb4d1', 'c5'],
     ['下课能不能留十分钟答疑', '#ffa94d', 'c6'],
-    ['这个工具是免费的吗', '#b197fc', 'c7']
+    ['这个工具是免费的吗', '#b197fc', 'c7'],
+    ['希望课后能把资料发群里', '#66e3d0', 'c8'],
+    ['刚才那个表格能再放一遍吗', '#7cc4ff', 'c9'],
+    ['讲得很好，受益匪浅', '#ffe066', 'c10'],
+    ['第三个案例和我们业务很像', '#7ee787', 'c11'],
+    ['能不能演示一下实际操作', '#ffb4d1', 'c12'],
+    ['这套方案大概多少钱', '#ffa94d', 'c13'],
+    ['线上会有回放吗', '#b197fc', 'c14']
   ];
   for (const [text, color, cid, kind] of demo) {
-    await send(text, color, cid, kind);
-    await sleep(120);
+    await send(text, color, cid, kind).catch((e) => console.log('skip', text, e.message));
+    await sleep(420);
   }
 
   const win = new BrowserWindow({
     width: 420,
     height: 900,
-    show: false,
+    show: true,
     webPreferences: { offscreen: false }
   });
   await win.loadURL(URL);
@@ -85,7 +92,7 @@ app.whenReady().then(async () => {
 
   // 实时追加
   await send('这条是页面打开之后发的', '#66e3d0', 'c8');
-  await sleep(600);
+  await sleep(900);
   const after = await win.webContents.executeJavaScript(
     "({count: document.querySelectorAll('#feedList .msg').length, last: (document.querySelector('#feedList .msg:last-child .msg-bubble')||{}).textContent})"
   );
@@ -93,6 +100,20 @@ app.whenReady().then(async () => {
   const shot2 = path.join(__dirname, 'out', 'feed-live.png');
   const img2 = await win.webContents.capturePage();
   require('fs').writeFileSync(shot2, img2.toPNG());
+
+  // 翻到顶部后再来新消息：应出现 "↓ N 条新消息" 且不自动滚回底部
+  await win.webContents.executeJavaScript(
+    "(() => { const l = document.getElementById('feedList'); l.scrollTop = 0; l.dispatchEvent(new Event('scroll')); return l.scrollTop; })()"
+  );
+  await sleep(200);
+  await send('翻上去之后的新消息', '#ffe066', 'c9');
+  await sleep(700);
+  const pill = await win.webContents.executeJavaScript(`(() => {
+    const l = document.getElementById('feedList');
+    const n = document.getElementById('feedNew');
+    return { pillHidden: n.hidden, pillText: n.textContent, scrollTop: l.scrollTop };
+  })()`);
+  console.log('翻到顶部后:', JSON.stringify(pill));
 
   console.log('截图:', shot1, shot2);
   app.quit();

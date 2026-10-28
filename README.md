@@ -10,6 +10,8 @@
 
 只支持 Windows。界面风格沿用 MyPassword 的深墨绿 + 薄荷绿。
 
+> 想了解代码结构、模块关系和各处"为什么这么写"，看 **[docs/architecture.md](docs/architecture.md)**（实现文档，含需求对照表与技术路线讨论）。
+
 ---
 
 ## 一、快速开始
