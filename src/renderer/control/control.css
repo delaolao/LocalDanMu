@@ -729,12 +729,51 @@ input[type="range"] {
 
 .foot {
   flex: 0 0 auto;
-  padding: 7px 12px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px 8px;
   font-size: 10.5px;
   color: var(--muted-2);
-  text-align: center;
   border-top: 1px solid var(--border-soft);
 }
+
+.foot-keys {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 页脚右上角的仓库入口，样式参照常见开源项目的小圆角胶囊 */
+.repo-link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+
+.repo-link:hover {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.repo-link:active { transform: translateY(1px); }
+
+.repo-link svg { flex: 0 0 auto; }
 
 /* ------------------------------------------------------------ 结束遮罩 */
 

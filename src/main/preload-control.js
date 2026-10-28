@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
 
   copyLink: () => ipcRenderer.invoke('app:copy'),
   exportData: () => ipcRenderer.invoke('app:export'),
+  openRepo: () => ipcRenderer.invoke('app:openRepo'),
   setConfig: (patch) => ipcRenderer.invoke('app:setConfig', patch),
   setDisplay: (id) => ipcRenderer.invoke('app:setDisplay', id),
   setNic: (address) => ipcRenderer.invoke('app:setNic', address),

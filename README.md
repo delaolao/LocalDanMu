@@ -1,4 +1,4 @@
-﻿# 培训弹幕 v0.1.1（本地版）
+﻿# 培训弹幕 v0.1.2（本地版）
 
 线下培训用的弹幕系统：讲师在自己电脑上开一个窗口，观众扫码进入网页发文字/图片，内容实时飘在 PPT 上方；需要看整体意见分布时，一键切到「词云」大屏。
 
@@ -32,9 +32,9 @@ npm run dist:cn     # 国内网络用这个：走 npmmirror 镜像，并且顺�
 
 | 文件 | 形态 | 说明 |
 | --- | --- | --- |
-| `dist\LocalDanMu-Setup-0.1.1.exe` | 安装版 | 双击安装，开始菜单有快捷方式，装到 `%LOCALAPPDATA%` |
-| `dist\LocalDanMu-Portable-0.1.1.exe` | 单文件便携版 | 一个 exe，双击即用，不需要安装；每次启动会解压到临时目录，启动稍慢 |
-| `dist\LocalDanMu-0.1.1-win-x64.zip` | 绿色解压版 | 解压到任意文件夹，双击里面的 `LocalDanMu.exe`；启动最快，推荐 U 盘/临时电脑用 |
+| `dist\LocalDanMu-Setup-0.1.2.exe` | 安装版 | 双击安装，开始菜单有快捷方式，装到 `%LOCALAPPDATA%` |
+| `dist\LocalDanMu-Portable-0.1.2.exe` | 单文件便携版 | 一个 exe，双击即用，不需要安装；每次启动会解压到临时目录，启动稍慢 |
+| `dist\LocalDanMu-0.1.2-win-x64.zip` | 绿色解压版 | 解压到任意文件夹，双击里面的 `LocalDanMu.exe`；启动最快，推荐 U 盘/临时电脑用 |
 
 三种形态功能完全一样，只是数据目录不同（见下）。
 

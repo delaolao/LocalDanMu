@@ -1175,6 +1175,16 @@ function bootstrap() {
       return true;
     });
 
+    // 页脚的 GitHub 胶囊按钮
+    ipcMain.handle('app:openRepo', async () => {
+      try {
+        await shell.openExternal('https://github.com/delaolao/LocalDanMu');
+        return true;
+      } catch (_) {
+        return false;
+      }
+    });
+
     ipcMain.handle('app:export', async () => {
       await exportHistory();
       return true;

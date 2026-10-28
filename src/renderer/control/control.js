@@ -262,6 +262,8 @@
 
   $('joinBtn').addEventListener('click', () => guard(api.toggleJoin()));
 
+  $('repoBtn').addEventListener('click', () => api.openRepo());
+
   $('modeScroll').addEventListener('click', () => guard(api.setMode('scroll')));
   $('modeCloud').addEventListener('click', () => guard(api.setMode('cloud')));
 
