@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /**
  * 创建 / 更新 GitHub Release（文案取自 scripts/release-notes.md）
