@@ -112,14 +112,19 @@ server.js onConnection
 LocalDanMu/
 ├─ package.json                 依赖、构建配置（nsis + portable）、版本号
 ├─ README.md                    使用者视角的说明（装、跑、排障）
-├─ docs/architecture.md         本文档
-├─ assets/                      应用图标、托盘图标（由 scripts/make-icons.py 生成）
+├─ docs/architecture.md         本文档（architecture.pdf 是它的打印版）
+├─ LocalDanMu-512x512.png       图标母版（换图标只改这张，再跑 make-icons.py）
+├─ assets/                      生成出来的图标：icon.png / icon-256.png / tray-*.png
 ├─ scripts/                     构建、测试、发布、诊断脚本（不进安装包）
 └─ src/
    ├─ main/                     主进程（Node 环境）
    ├─ renderer/                 四个窗口的页面（浏览器环境）
    └─ web/                      观众端 H5（由 HTTP 服务直接吐出）
 ```
+
+> 图标管线：`python scripts/make-icons.py` 读取根目录的 512 母版，按 LANCZOS 缩放出
+> `icon.png`（512，打包用）、`icon-256.png`、`tray-16/32.png`（托盘）。
+> exe / 安装包 / 快捷方式的图标由 electron-builder 从 `icon.png` 生成 .ico，无需手工准备多尺寸。
 
 ### 3.1 主进程 `src/main/`
 
