@@ -416,17 +416,15 @@ body {
 
 /* ---------------------------------------------------------------- 调色板 */
 
+/* 颜色行：9 个色块在窄屏上必须整体可见。
+   原来用 overflow-x:auto 横向滚动，部分手机内核（微信 X5）会把 flex 子项压扁成椭圆、
+   还把最后一个色块切掉，所以改成自动换行——宁可占两行，也不能变形或藏起来。 */
 .colors {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 0 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.colors::-webkit-scrollbar {
-  display: none;
 }
 
 .swatch {
@@ -448,6 +446,20 @@ body {
 .swatch.active {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--bubble-bg);
+}
+
+/* 极窄屏（老机型 / 分屏）再收一档，保证一行放得下 */
+@media (max-width: 350px) {
+  .colors {
+    gap: 6px;
+  }
+  .swatch {
+    width: 22px;
+    height: 22px;
+  }
+  .swatch.auto {
+    padding: 0 9px;
+  }
 }
 
 .swatch.auto {

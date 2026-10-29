@@ -1,6 +1,6 @@
 {
   "name": "local-danmu",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "线下培训弹幕互动平台（局域网自建版，数据不出本机）",
   "main": "src/main/main.js",
