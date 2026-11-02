@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -11,5 +11,8 @@ contextBridge.exposeInMainWorld('cloud', {
   getHistory: () => ipcRenderer.invoke('history:get'),
   onItem: (callback) => {
     ipcRenderer.on('dm:item', (_event, item) => callback(item));
+  },
+  onLike: (callback) => {
+    ipcRenderer.on('dm:like', (_event, payload) => callback(payload));
   }
 });

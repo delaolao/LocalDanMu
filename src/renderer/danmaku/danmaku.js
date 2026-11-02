@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 弹幕渲染层
@@ -113,7 +113,7 @@
     if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING);
   }
 
-  function buildText(content, color) {
+  function buildText(content, color, meta) {
     ctx.font = fontSpec();
     const text = fitText(content, W * 0.85);
     const width = Math.ceil(ctx.measureText(text).width + fontPx * 0.6);
@@ -124,11 +124,14 @@
       font: fontSpec(),
       w: width,
       h: Math.round(fontPx * 1.35),
-      speed: pxPerSec()
+      speed: pxPerSec(),
+      seq: meta && meta.seq,
+      likes: (meta && meta.likes) || 0,
+      replay: Boolean(meta && meta.replay)
     });
   }
 
-  function buildImage(payload) {
+  function buildImage(payload, meta) {
     const img = new Image();
     img.onload = function () {
       const ratio = img.width / img.height || 1;
@@ -139,7 +142,15 @@
         w = maxW;
         h = w / ratio;
       }
-      enqueue({ kind: 'image', img, w: Math.round(w), h: Math.round(h), speed: pxPerSec() });
+      enqueue({
+        kind: 'image',
+        img,
+        w: Math.round(w),
+        h: Math.round(h),
+        speed: pxPerSec(),
+        seq: meta && meta.seq,
+        likes: (meta && meta.likes) || 0
+      });
     };
     img.onerror = function () {
       /* 图片坏了就当没收到 */
@@ -149,8 +160,19 @@
 
   function onItem(msg) {
     if (!msg || !msg.payload) return;
-    if (msg.contentType === 'image') buildImage(msg.payload);
-    else buildText(String(msg.payload), msg.color);
+    const meta = { seq: msg.seq, likes: msg.likes || 0, replay: msg.replay };
+    if (msg.contentType === 'image') buildImage(msg.payload, meta);
+    else buildText(String(msg.payload), msg.color, meta);
+  }
+
+  /** 主进程推来的点赞数：更新屏上这一条（以及还在排队的那条） */
+  function onLike(msg) {
+    if (!msg || typeof msg.seq !== 'number') return;
+    for (const list of [items, pending]) {
+      for (const it of list) {
+        if (it.seq === msg.seq) it.likes = msg.likes;
+      }
+    }
   }
 
   function clear() {
@@ -172,6 +194,27 @@
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.drawImage(item.img, item.x, item.y, item.w, item.h);
+
+      // 图片的获赞数：右下角贴一个小圆角标签，不占轨道宽度
+      if (item.likes > 0) {
+        const fs = Math.max(11, Math.round(fontPx * 0.4));
+        const label = '♥' + (item.likes > 99 ? '99+' : item.likes);
+        ctx.font = `600 ${fs}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+        const tw = ctx.measureText(label).width;
+        const bw = tw + fs * 1.1;
+        const bh = fs * 1.6;
+        const bx = item.x + item.w - bw - 6;
+        const by = item.y + item.h - bh - 6;
+        ctx.fillStyle = 'rgba(6, 16, 14, 0.78)';
+        roundRect(bx, by, bw, bh, bh / 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(52, 211, 153, 0.98)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, bx + bw / 2, by + bh / 2);
+        ctx.textAlign = 'start';
+        ctx.textBaseline = 'alphabetic';
+      }
       // 鼠标停上来时描一圈薄荷色 + 提示可以点，让"是否进入可点状态"一眼可见
       if (item === hoverItem) {
         ctx.strokeStyle = 'rgba(52, 211, 153, 0.95)';
@@ -217,6 +260,48 @@
     ctx.shadowOffsetY = 0;
     ctx.fillStyle = item.color || '#ffffff';
     ctx.fillText(item.text, item.x, baseline);
+
+    // 获赞数：接在文字末尾，用薄荷色小字，不占轨道宽度（最多和右边那条短暂擦一下）
+    if (item.likes > 0) {
+      const textW = ctx.measureText(item.text).width;
+      const fs = Math.max(11, Math.round(fontPx * 0.42));
+      const label = '♥' + (item.likes > 99 ? '99+' : item.likes);
+      ctx.font = `600 ${fs}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+      ctx.shadowColor = 'rgba(0,0,0,0.75)';
+      ctx.shadowBlur = Math.max(3, fs * 0.25);
+      ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+      ctx.lineWidth = Math.max(2.5, fs * 0.2);
+      const lx = item.x + textW + Math.max(6, fontPx * 0.16);
+      const ly = baseline - fontPx * 0.1;
+      ctx.strokeText(label, lx, ly);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(52, 211, 153, 0.98)';
+      ctx.fillText(label, lx, ly);
+      ctx.font = item.font;
+    }
+
+    // 高赞复现：右上角打一个「共鸣」小标，让观众知道这条是被顶回来的
+    if (item.replay) {
+      const fs = Math.max(11, Math.round(fontPx * 0.4));
+      const label = '共鸣';
+      ctx.font = `600 ${fs}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+      const tw = ctx.measureText(label).width;
+      const bw = tw + fs * 1.0;
+      const bh = fs * 1.6;
+      const bx = item.x;
+      let by = item.y - bh - 4;
+      if (by < 2) by = item.y + item.h + 2;
+      ctx.fillStyle = 'rgba(52, 211, 153, 0.92)';
+      roundRect(bx, by, bw, bh, bh / 2);
+      ctx.fill();
+      ctx.fillStyle = '#04120d';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, bx + bw / 2, by + bh / 2);
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = item.font;
+    }
   }
 
   function roundRect(x, y, w, h, r) {
@@ -476,6 +561,7 @@
 
   resize();
   window.dm.onCommand(onCommand);
+  window.dm.onLike(onLike);
   window.dm.onItem(onItem);
   window.dm.ready();
 

@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -209,6 +209,23 @@
     $('wifiName').textContent = cfg.wifiSsid || '—';
     $('wifiPwd').textContent = cfg.wifiPassword ? '密码 ' + cfg.wifiPassword : '无密码';
 
+    // 现场信号：三条累计计数，条形按当前最大值归一化
+    const sig = next.signals || {};
+    const sigTotal = sig.total || { agree: 0, confused: 0, slow: 0 };
+    const sigMax = Math.max(1, sigTotal.agree || 0, sigTotal.confused || 0, sigTotal.slow || 0);
+    const paintSignal = (key, numId, barId) => {
+      const n = Number(sigTotal[key]) || 0;
+      setText(numId, n);
+      const bar = $(barId);
+      if (bar) bar.style.width = Math.round((n / sigMax) * 100) + '%';
+    };
+    paintSignal('agree', 'sigAgree', 'barAgree');
+    paintSignal('confused', 'sigConfused', 'barConfused');
+    paintSignal('slow', 'sigSlow', 'barSlow');
+
+    const autoReplay = $('autoReplay');
+    if (autoReplay) autoReplay.checked = cfg.autoReplay !== false;
+
     setControl('speedRange', cfg.speed);
     setControl('fontRange', cfg.fontPx);
     setControl('opacityRange', cfg.opacity);
@@ -263,6 +280,10 @@
   $('joinBtn').addEventListener('click', () => guard(api.toggleJoin()));
 
   $('repoBtn').addEventListener('click', () => api.openRepo());
+
+  $('autoReplay').addEventListener('change', (event) => {
+    guard(api.setConfig({ autoReplay: event.target.checked }));
+  });
 
   $('modeScroll').addEventListener('click', () => guard(api.setMode('scroll')));
   $('modeCloud').addEventListener('click', () => guard(api.setMode('cloud')));

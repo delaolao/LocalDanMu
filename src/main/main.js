@@ -351,6 +351,8 @@ function bootstrap() {
       token,
       getConfig: () => ({ ...store.get(), paused }),
       onMessage: handleIncoming,
+      onLike: handleLikeSignal,
+      onSignals: handleReactSignal,
       filter: (text) => (filterImpl ? filterImpl.check(text) : null),
       onStats: (s) => {
         online = s.online;
@@ -464,6 +466,7 @@ function bootstrap() {
       contentType: item.contentType,
       text: item.contentType === 'text' ? item.payload : '',
       color: item.color || null,
+      likes: item.likes || 0,
       flagged: Boolean(item.flagged),
       flagCategory: item.flagCategory || null
     };
@@ -476,6 +479,7 @@ function bootstrap() {
 
   function handleIncoming(msg) {
     total += 1;
+    if (typeof msg.likes !== 'number') msg.likes = 0;
     history.push(msg);
     trimHistory();
 
@@ -492,6 +496,55 @@ function bootstrap() {
         }
       }
     }
+    schedulePush();
+  }
+
+  /* ------------------------------------------------------- 点赞与快捷反应 */
+
+  // 点赞数跨过这些台阶时，自动把这条重新推上屏（"共鸣"效果）
+  const LIKE_REPLAY_STEPS = [5, 10, 20, 50, 100];
+  let lastLikeReplayAt = 0;
+
+  function handleLikeSignal(payload) {
+    const seqNo = payload && payload.seq;
+    const likes = payload && payload.likes;
+    if (typeof seqNo !== 'number' || typeof likes !== 'number') return;
+
+    const item = history.find((m) => m.seq === seqNo);
+    if (item) item.likes = likes;
+
+    for (const win of [overlayWin, cloudWin]) {
+      if (win && !win.isDestroyed()) {
+        try {
+          win.webContents.send('dm:like', { seq: seqNo, likes });
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
+    schedulePush();
+    maybeReplayByLikes(seqNo, likes);
+  }
+
+  function maybeReplayByLikes(seqNo, likes) {
+    if (!store.get().autoReplay) return;
+    if (store.get().mode !== 'scroll') return; // 词云模式下不打断讲师
+    if (LIKE_REPLAY_STEPS.indexOf(likes) < 0) return;
+    const now = Date.now();
+    if (now - lastLikeReplayAt < 15000) return; // 15 秒内只复现一次，避免刷屏
+    const item = history.find((m) => m.seq === seqNo);
+    if (!item) return;
+    lastLikeReplayAt = now;
+    try {
+      overlayWin.webContents.send('dm:item', { ...item, replay: true });
+      log('like-replay', `seq=${seqNo} likes=${likes}`);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function handleReactSignal() {
+    // 快捷反应只是计数，渲染层从 buildState 里读
     schedulePush();
   }
 
@@ -581,6 +634,10 @@ function bootstrap() {
       overlayVisible,
       joinVisible: Boolean(joinWin && !joinWin.isDestroyed() && joinWin.isVisible()),
       config: { ...store.get() },
+      signals:
+        bridge && typeof bridge.signals === 'function'
+          ? bridge.signals()
+          : { total: { agree: 0, confused: 0, slow: 0 }, recent: { agree: 0, confused: 0, slow: 0 }, windowMs: 60000 },
       warnings,
       shortcuts: shortcutReport,
       version: app.getVersion()
@@ -1738,6 +1795,87 @@ function bootstrap() {
 
         viewer.showInactive();
         await delay(300);
+
+        // 快捷反应 + 点赞：端到端跑一遍
+        try {
+          await viewer.webContents.executeJavaScript(
+            "document.querySelector('.react[data-kind=\"agree\"]').click(); true"
+          );
+          await delay(500);
+          const sig = bridge.signals();
+          result.signals = sig.total;
+
+          const posted = await new Promise((resolve, reject) => {
+            const WebSocket = require('ws');
+            const sock = new WebSocket(`ws://127.0.0.1:${session.port}/ws?t=${session.token}`);
+            const timer = setTimeout(() => {
+              try {
+                sock.close();
+              } catch (_) {
+                /* ignore */
+              }
+              reject(new Error('ws timeout'));
+            }, 5000);
+            sock.on('open', () =>
+              sock.send(
+                JSON.stringify({
+                  type: 'message',
+                  msgId: 'smoke-like-' + Date.now(),
+                  contentType: 'text',
+                  payload: '这条用来测试点赞',
+                  color: '#7ee787',
+                  clientId: 'smoke-other'
+                })
+              )
+            );
+            sock.on('message', (raw) => {
+              const m = JSON.parse(String(raw));
+              if (m.type === 'ack') {
+                clearTimeout(timer);
+                sock.close();
+                resolve(m);
+              }
+            });
+            sock.on('error', reject);
+          });
+          result.likeSeq = posted.seq;
+
+          // 等按钮出现再点（广播到达时间不固定），点完再等计数回来
+          result.likeClick = { found: false };
+          for (let i = 0; i < 10 && !result.likeClick.found; i += 1) {
+            // eslint-disable-next-line no-await-in-loop
+            await delay(250);
+            // eslint-disable-next-line no-await-in-loop
+            result.likeClick = await viewer.webContents.executeJavaScript(`(() => {
+              const btn = document.querySelector('.like[data-seq="${posted.seq}"]');
+              if (!btn) return { found: false };
+              btn.click();
+              return { found: true };
+            })()`);
+          }
+          result.likeAfter = null;
+          for (let i = 0; i < 10; i += 1) {
+            // eslint-disable-next-line no-await-in-loop
+            await delay(250);
+            // eslint-disable-next-line no-await-in-loop
+            result.likeAfter = await viewer.webContents.executeJavaScript(`(() => {
+              const btn = document.querySelector('.like[data-seq="${posted.seq}"]');
+              const toast = document.getElementById('toast');
+              return {
+                text: btn ? btn.textContent : null,
+                liked: btn ? btn.classList.contains('liked') : null,
+                toast: toast && !toast.hidden ? toast.textContent : '',
+                connected: document.getElementById('status').textContent
+              };
+            })()`);
+            if (result.likeAfter && result.likeAfter.liked) break;
+          }
+          const liked = history.find((m) => m.seq === posted.seq);
+          result.likeCount = liked ? liked.likes : 0;
+        } catch (err) {
+          result.notes = result.notes || [];
+          result.notes.push('signals: ' + err.message);
+        }
 
         // 深色：验证 CSS 变量 + head 里的主题引导脚本
         await viewer.webContents.executeJavaScript("localStorage.setItem('dm_theme','dark'); location.reload(); true");

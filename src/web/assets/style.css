@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #06100e;
   --card: #0d1f1a;
   --line: #23453c;
@@ -265,7 +265,8 @@ body {
 }
 
 .msg-bubble {
-  max-width: 84%;
+  max-width: 100%;
+  min-width: 0;
   padding: 8px 12px;
   border-radius: 14px;
   background: var(--card);
@@ -426,6 +427,94 @@ body {
   gap: 8px;
   padding: 0 2px;
 }
+
+/* ------------------------------------------------------- 点赞与快捷反应 */
+
+.reacts {
+  display: flex;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.react {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: transform .12s ease, color .15s, border-color .15s, background .15s;
+}
+
+.react .ico { font-size: 14px; line-height: 1; }
+
+.react .n {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--faint);
+  min-width: 8px;
+}
+
+.react .n:empty { display: none; }
+
+.react:active { transform: scale(0.96); }
+
+.react.bump {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(15, 159, 120, .1));
+}
+
+.react[disabled] { opacity: .55; }
+
+/* 消息气泡右下角的小赞按钮 */
+.msg-line {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+  max-width: 88%;
+}
+
+.msg.mine .msg-line { flex-direction: row-reverse; }
+
+.like {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s, transform .1s;
+}
+
+.like:active { transform: scale(0.94); }
+
+.like.liked {
+  color: #e2557f;
+  border-color: rgba(226, 85, 127, 0.45);
+  background: rgba(226, 85, 127, 0.1);
+}
+
+.like .cnt { font-variant-numeric: tabular-nums; }
+.like .cnt:empty { display: none; }
 
 .swatch {
   flex: 0 0 auto;

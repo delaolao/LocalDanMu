@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 观众端（手机 H5）
@@ -101,7 +101,11 @@
     theme: $('themeBtn'),
     feedList: $('feedList'),
     feedEmpty: $('feedEmpty'),
-    feedNew: $('feedNew')
+    feedNew: $('feedNew'),
+    reacts: $('reacts'),
+    nAgree: $('nAgree'),
+    nConfused: $('nConfused'),
+    nSlow: $('nSlow')
   };
 
   /* -------------------------------------------------------- 现场弹幕流 */
@@ -137,15 +141,126 @@
       bubble.textContent = String(brief.text || '');
     }
 
+    var line = document.createElement('div');
+    line.className = 'msg-line';
+    line.appendChild(bubble);
+
+    // 别人的消息才可以点赞；自己的消息连按钮都不出现
+    if (!mine && brief.seq) {
+      var liked = state.likedSeqs.indexOf(brief.seq) >= 0;
+      var like = document.createElement('button');
+      like.type = 'button';
+      like.className = 'like' + (liked ? ' liked' : '');
+      like.setAttribute('data-seq', String(brief.seq));
+      like.title = '点个赞';
+      like.innerHTML = '♥<span class="cnt">' + (brief.likes > 0 ? brief.likes : '') + '</span>';
+      line.appendChild(like);
+    }
+
     // 自己的消息靠右，别人的靠左，和常见聊天界面一致
     if (mine) {
-      li.appendChild(bubble);
+      li.appendChild(line);
       li.appendChild(dot);
     } else {
       li.appendChild(dot);
-      li.appendChild(bubble);
+      li.appendChild(line);
     }
     return li;
+  }
+
+  /* --------------------------------------------------- 点赞 / 快捷反应 */
+
+  var signalCooldown = { agree: 0, confused: 0, slow: 0 };
+
+  function sendSignal(obj) {
+    if (!state.connected || !ws) return false;
+    try {
+      ws.send(JSON.stringify(obj));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function likeFromButton(btn) {
+    var seq = Number(btn.getAttribute('data-seq'));
+    if (!seq || state.likedSeqs.indexOf(seq) >= 0) return;
+
+    state.likedSeqs.push(seq);
+    btn.classList.add('liked');
+    var cnt = btn.querySelector('.cnt');
+    var cur = Number(cnt.textContent) || 0;
+    cnt.textContent = String(cur + 1);
+
+    if (!sendSignal({ type: 'like', seq: seq, clientId: CID })) {
+      state.likedSeqs = state.likedSeqs.filter(function (s) {
+        return s !== seq;
+      });
+      btn.classList.remove('liked');
+      cnt.textContent = cur > 0 ? String(cur) : '';
+      toast('连接断开了，正在重连…');
+    }
+  }
+
+  function bumpLike(seq, likes) {
+    if (!els.feedList) return;
+    var btn = els.feedList.querySelector('.like[data-seq="' + seq + '"]');
+    if (!btn) return;
+    var cnt = btn.querySelector('.cnt');
+    if (cnt) cnt.textContent = likes > 0 ? String(likes) : '';
+  }
+
+  function onLikeReject(msg) {
+    var seq = Number(msg.seq);
+    if (seq && state.likedSeqs.indexOf(seq) >= 0) {
+      state.likedSeqs = state.likedSeqs.filter(function (s) {
+        return s !== seq;
+      });
+      var btn = els.feedList ? els.feedList.querySelector('.like[data-seq="' + seq + '"]') : null;
+      if (btn) {
+        btn.classList.remove('liked');
+        var cnt = btn.querySelector('.cnt');
+        var cur = Number(cnt && cnt.textContent) || 0;
+        if (cnt) cnt.textContent = cur > 1 ? String(cur - 1) : '';
+      }
+    }
+    if (msg.reason === 'own') toast('不能给自己点赞');
+    else if (msg.reason === 'too_fast') toast('手速太快了');
+    else if (msg.reason === 'too_many') toast('点赞太频繁，歇一下');
+    else if (msg.reason === 'gone') toast('这条已经翻篇了');
+  }
+
+  function reactFromButton(btn) {
+    var kind = btn.getAttribute('data-kind');
+    if (!kind) return;
+    var now = Date.now();
+    if (now < (signalCooldown[kind] || 0)) return;
+    if (!sendSignal({ type: 'react', kind: kind })) {
+      toast('连接断开了，正在重连…');
+      return;
+    }
+    signalCooldown[kind] = now + 2000;
+    btn.disabled = true;
+    btn.classList.add('bump');
+    setTimeout(function () {
+      btn.disabled = false;
+      btn.classList.remove('bump');
+    }, 2000);
+  }
+
+  function paintSignals(sig) {
+    if (!sig) return;
+    var total = sig.total || sig;
+    var pairs = [
+      [els.nAgree, total.agree],
+      [els.nConfused, total.confused],
+      [els.nSlow, total.slow]
+    ];
+    for (var i = 0; i < pairs.length; i += 1) {
+      var el = pairs[i][0];
+      var n = Number(pairs[i][1]) || 0;
+      if (el) el.textContent = n > 0 ? String(n) : '';
+    }
   }
 
   function feedToEnd() {
@@ -219,7 +334,9 @@
     cooldownUntil: 0,
     pending: null,
     retry: 0,
-    busy: false
+    busy: false,
+    signals: null,
+    likedSeqs: []
   };
 
   var ws = null;
@@ -384,8 +501,27 @@
       }
       state.intervalSec = Number(msg.intervalSec) || 5;
       state.paused = Boolean(msg.paused);
+      state.signals = msg.signals || null;
       if (msg.recent && msg.recent.length) renderFeedRecent(msg.recent);
+      paintSignals(msg.signals);
       updateHint();
+      return;
+    }
+    if (msg.type === 'like') {
+      bumpLike(msg.seq, msg.likes);
+      return;
+    }
+    if (msg.type === 'like-reject') {
+      onLikeReject(msg);
+      return;
+    }
+    if (msg.type === 'react') {
+      state.signals = msg.signals || state.signals;
+      paintSignals(msg.signals);
+      return;
+    }
+    if (msg.type === 'react-reject') {
+      if (msg.reason === 'too_fast') toast('慢一点，别连点');
       return;
     }
     if (msg.type === 'item') {
@@ -702,7 +838,19 @@
   updateHint();
   updateSendButton();
 
-  if (els.feedList) els.feedList.addEventListener('scroll', onFeedScroll, { passive: true });
+  if (els.feedList) {
+    els.feedList.addEventListener('scroll', onFeedScroll, { passive: true });
+    els.feedList.addEventListener('click', function (event) {
+      var btn = event.target && event.target.closest ? event.target.closest('.like') : null;
+      if (btn) likeFromButton(btn);
+    });
+  }
+  if (els.reacts) {
+    els.reacts.addEventListener('click', function (event) {
+      var btn = event.target && event.target.closest ? event.target.closest('.react') : null;
+      if (btn) reactFromButton(btn);
+    });
+  }
   if (els.feedNew) els.feedNew.addEventListener('click', feedToEnd);
   // 切回前台时，如果原本停在底部就把攒下的新消息补上
   document.addEventListener('visibilitychange', function () {

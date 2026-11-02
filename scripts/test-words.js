@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 词云切词/聚合单测。
@@ -70,6 +70,25 @@ it('max 限制生效', () => {
 
 it('空输入返回空数组', () => {
   assert.deepStrictEqual(aggregate([]), []);
+});
+
+it('点赞会给词加权，但不改变出现次数', () => {
+  const list = aggregate([
+    { text: '太难了', likes: 0 },
+    { text: '一般', likes: 12 }
+  ]);
+  const hard = list.find((x) => x.word === '太难');
+  const meh = list.find((x) => x.word === '一般');
+  assert.strictEqual(hard.count, 1);
+  assert.strictEqual(meh.count, 1);
+  assert.ok(meh.score > hard.score, '高赞词得分应更高');
+  assert.ok(meh.score > meh.count, '得分应包含点赞加成');
+});
+
+it('高赞加成用对数压缩，不会让一条消息统治全场', () => {
+  const one = aggregate([{ text: '太难', likes: 100 }])[0];
+  assert.ok(one.score < 1 + 100, '100 个赞不能等于 100 倍权重');
+  assert.ok(one.score > 1, '但仍应显著高于无赞');
 });
 
 console.log(`\n结果：${passed} 通过，${failed} 失败\n`);

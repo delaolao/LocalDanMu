@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('dm', {
   /** 主进程轮询到鼠标左键按下（页面收不到 click 时兜底） */
   onClick: (callback) => {
     ipcRenderer.on('dm:click', (_event, point) => callback(point));
+  },
+  /** 点赞数变化：更新屏上那一条 */
+  onLike: (callback) => {
+    ipcRenderer.on('dm:like', (_event, payload) => callback(payload));
   },
   ready: () => ipcRenderer.send('dm:ready')
 });

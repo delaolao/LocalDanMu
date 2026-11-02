@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 词云大屏
@@ -85,6 +85,13 @@
       text.textContent = item.contentType === 'image' ? '［图片］' : item.text || '';
       row.appendChild(text);
 
+      if ((item.likes || 0) > 0) {
+        const likes = document.createElement('span');
+        likes.className = 'feed-likes';
+        likes.textContent = '♥' + item.likes;
+        row.appendChild(likes);
+      }
+
       frag.appendChild(row);
     }
     box.innerHTML = '';
@@ -95,11 +102,46 @@
     feed.unshift(item);
     if (feed.length > FEED_MAX) feed.length = FEED_MAX;
     if (item.contentType === 'text' && item.text) {
-      texts.push(item.text);
+      texts.push({ seq: item.seq, text: item.text, likes: item.likes || 0 });
       if (texts.length > 600) texts = texts.slice(-600);
       scheduleRedraw();
     }
     renderFeed();
+    renderTop5();
+  }
+
+  /** 点赞变化：更新词权重和 TOP5 */
+  function onLike(payload) {
+    if (!payload || typeof payload.seq !== 'number') return;
+    for (const t of texts) {
+      if (t && t.seq === payload.seq) t.likes = payload.likes;
+    }
+    for (const f of feed) {
+      if (f && f.seq === payload.seq) f.likes = payload.likes;
+    }
+    renderTop5();
+    scheduleRedraw();
+  }
+
+  function renderTop5() {
+    const box = $('top5');
+    if (!box) return;
+    const top = feed
+      .filter((f) => f && f.contentType === 'text' && f.text && (f.likes || 0) > 0)
+      .sort((a, b) => (b.likes || 0) - (a.likes || 0))
+      .slice(0, 5);
+
+    if (!top.length) {
+      box.innerHTML = '<div class="top5-empty">还没有人点赞</div>';
+      return;
+    }
+
+    // 文本一律用 textContent 填，避免把消息内容当 HTML
+    box.innerHTML = top
+      .map((f, i) => `<div class="top5-item"><span class="idx">${i + 1}</span><span class="txt"></span><span class="likes">♥${f.likes}</span></div>`)
+      .join('');
+    const nodes = box.querySelectorAll('.top5-item .txt');
+    for (let i = 0; i < nodes.length; i += 1) nodes[i].textContent = top[i].text;
   }
 
   function scheduleRedraw() {
@@ -155,7 +197,7 @@
     }
     empty.hidden = true;
 
-    const maxCount = list[0].count || 1;
+    const maxCount = list[0].score || list[0].count || 1;
     // 词少的时候放大一点，别让大屏显得空
     const few = list.length <= 8;
     const maxSize = Math.min(H * (few ? 0.26 : 0.17), few ? 190 : 128);
@@ -164,7 +206,7 @@
     const placed = [];
 
     for (const item of list) {
-      const t = Math.sqrt(item.count / maxCount);
+      const t = Math.sqrt((item.score || item.count) / maxCount);
       let size = Math.round(minSize + (maxSize - minSize) * t);
       const color = colors[hash(item.word) % colors.length];
       let done = false;
@@ -172,7 +214,8 @@
       for (let shrink = 0; shrink < 3 && !done; shrink += 1) {
         const font = `700 ${size}px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif`;
         ctx.font = font;
-        const label = item.count > 1 ? `${item.word} ×${item.count}` : item.word;
+        const count = Math.max(1, Math.round(item.count));
+        const label = count > 1 ? `${item.word} ×${count}` : item.word;
         const w = ctx.measureText(label).width + 12;
         const h = size * 1.18;
         const pos = findSpot(w, h, placed, W, H);
@@ -226,6 +269,7 @@
 
   window.cloud.onState(render);
   window.cloud.onItem(addItem);
+  window.cloud.onLike(onLike);
 
   window.cloud
     .getState()
@@ -234,8 +278,11 @@
       const res = await window.cloud.getHistory();
       const items = (res && res.items) || [];
       feed = items.slice().reverse();
-      texts = items.filter((i) => i.contentType === 'text' && i.text).map((i) => i.text);
+      texts = items
+        .filter((i) => i.contentType === 'text' && i.text)
+        .map((i) => ({ seq: i.seq, text: i.text, likes: i.likes || 0 }));
       renderFeed();
+      renderTop5();
       draw();
     })
     .catch(() => {

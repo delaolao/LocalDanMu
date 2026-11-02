@@ -1,4 +1,4 @@
-/* 视觉基调对齐 MyPassword：深墨绿底 + 薄荷绿强调、柔和描边、圆角卡片 */
+﻿/* 视觉基调对齐 MyPassword：深墨绿底 + 薄荷绿强调、柔和描边、圆角卡片 */
 
 :root {
   color-scheme: dark;
@@ -723,6 +723,81 @@ input[type="range"] {
 
 .field.row .btn {
   flex: 1;
+}
+
+/* ------------------------------------------------------------ 现场信号 */
+
+.signal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px 12px;
+}
+
+.signal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.switch input {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.signal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.signal-name {
+  flex: 0 0 62px;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+
+.signal-bar {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+.signal-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width .25s ease;
+}
+
+.signal-bar.warn i { background: var(--warning); }
+.signal-bar.soft i { background: var(--border-strong); }
+
+.signal-num {
+  flex: 0 0 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 /* ---------------------------------------------------------------- 页脚 */

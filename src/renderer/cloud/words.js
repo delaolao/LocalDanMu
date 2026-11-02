@@ -1,4 +1,4 @@
-(function (root, factory) {
+﻿(function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.CloudWords = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
@@ -65,21 +65,35 @@
   function aggregate(texts, opts) {
     const max = (opts && opts.max) || 60;
     const counts = new Map();
+    const scores = new Map();
     const order = new Map();
     let seq = 0;
 
-    for (const text of texts || []) {
+    for (const entry of texts || []) {
+      // 兼容两种输入：纯字符串，或 { text, likes }
+      const isObj = entry && typeof entry === 'object';
+      const text = isObj ? String(entry.text || '') : String(entry || '');
+      const likes = isObj ? Number(entry.likes) || 0 : 0;
+      // 高赞消息对词云的贡献加成：用 log 压一下，避免一条 100 赞的消息统治全场
+      const boost = likes > 0 ? Math.log2(1 + likes) * 0.8 : 0;
+
       for (const term of splitTerms(text)) {
         if (!counts.has(term)) {
           counts.set(term, 0);
+          scores.set(term, 0);
           order.set(term, seq++);
         }
         counts.set(term, counts.get(term) + 1);
+        scores.set(term, scores.get(term) + boost);
       }
     }
 
-    const list = Array.from(counts.entries()).map(([word, count]) => ({ word, count }));
-    list.sort((a, b) => b.count - a.count || order.get(a.word) - order.get(b.word));
+    const list = Array.from(counts.entries()).map(([word, count]) => ({
+      word,
+      count,
+      score: count + (scores.get(word) || 0)
+    }));
+    list.sort((a, b) => b.score - a.score || order.get(a.word) - order.get(b.word));
     return list.slice(0, max);
   }
 

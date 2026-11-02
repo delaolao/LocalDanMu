@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   color-scheme: dark;
   --bg: #06100e;
   --bg-soft: #091714;
@@ -286,4 +286,52 @@ main {
 
 .ft .dot {
   opacity: 0.5;
+}
+
+/* --------------------------------------------------- 共鸣 TOP5 */
+
+.top5 {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 14px 12px;
+}
+
+.top5-empty {
+  font-size: 12px;
+  color: var(--muted-2, #64867d);
+}
+
+.top5-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-soft, #c9e6dc);
+}
+
+.top5-item .idx {
+  flex: 0 0 16px;
+  color: var(--muted-2, #64867d);
+  font-size: 11px;
+}
+
+.top5-item .txt {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top5-item .likes {
+  flex: 0 0 auto;
+  color: var(--accent, #34d399);
+  font-size: 12px;
+}
+.feed-likes {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--accent, #34d399);
+  font-size: 11px;
 }

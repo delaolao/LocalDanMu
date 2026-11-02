@@ -39,6 +39,18 @@ const IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={
 /** 弹幕文字允许的颜色（与手机端调色板一致）。只收白名单，避免传深色导致大屏上看不清。 */
 const COLORS = ['#ffffff', '#ffe066', '#7ee787', '#7cc4ff', '#ffb4d1', '#ffa94d', '#b197fc', '#66e3d0'];
 
+/* ------------------------------------------------------------ 轻量信号 */
+/** 快捷反应：三种固定语义，只做计数，不进消息流 */
+const REACT_KINDS = ['agree', 'confused', 'slow'];
+/** 点赞与快捷反应共用一套节流参数：比发消息便宜，但也不能刷 */
+const SIGNAL_LIMITS = {
+  likeCooldownMs: 250, // 同一设备两次点赞的最小间隔
+  likePerMinute: 30, // 同一设备每分钟最多点赞次数
+  reactCooldownMs: 2000, // 快捷反应间隔（这是"信号"，不是连击）
+  globalRate: 25, // 全局令牌/秒
+  globalBurst: 60
+};
+
 function normalizeColor(raw) {
   if (typeof raw !== 'string') return null;
   const value = raw.trim().toLowerCase();
@@ -87,6 +99,8 @@ function createBridge(options) {
     getConfig,
     onMessage,
     onStats,
+    onLike = () => {},
+    onSignals = () => {},
     filter = null,
     onLog = () => {}
   } = options;
@@ -104,6 +118,16 @@ function createBridge(options) {
   const RECENT_MAX = 24;
   const recentItems = [];
 
+  // 点赞要按 seq 找到原消息：只留最近的，避免长会议无限增长
+  const SEQ_MAX = 400;
+  const itemsBySeq = new Map();
+
+  // 快捷反应的累计计数 + 最近 60 秒窗口（给控制面板画"现场信号"）
+  const signals = { agree: 0, confused: 0, slow: 0 };
+  const recentSignals = [];
+  const SIGNAL_WINDOW_MS = 60000;
+  let signalBucket = { tokens: SIGNAL_LIMITS.globalBurst, last: Date.now() };
+
   function broadcastRaw(obj) {
     const data = JSON.stringify(obj);
     for (const ws of wss.clients) {
@@ -114,6 +138,90 @@ function createBridge(options) {
           /* ignore */
         }
       }
+    }
+  }
+
+  /* ------------------------------------------------ 点赞 / 快捷反应 */
+
+  function takeSignalToken() {
+    const now = Date.now();
+    signalBucket.tokens = Math.min(
+      SIGNAL_LIMITS.globalBurst,
+      signalBucket.tokens + ((now - signalBucket.last) / 1000) * SIGNAL_LIMITS.globalRate
+    );
+    signalBucket.last = now;
+    if (signalBucket.tokens < 1) return false;
+    signalBucket.tokens -= 1;
+    return true;
+  }
+
+  /** 累计值 + 最近 60 秒的增量，控制面板据此画"现场信号" */
+  function signalSnapshot() {
+    const now = Date.now();
+    while (recentSignals.length && now - recentSignals[0].ts > SIGNAL_WINDOW_MS) recentSignals.shift();
+    const recent = { agree: 0, confused: 0, slow: 0 };
+    for (const s of recentSignals) recent[s.kind] += 1;
+    return { total: { ...signals }, recent, windowMs: SIGNAL_WINDOW_MS };
+  }
+
+  function handleLike(ws, client, msg) {
+    const seqNo = Number(msg.seq);
+    const item = Number.isFinite(seqNo) ? itemsBySeq.get(seqNo) : null;
+    const clientId = typeof msg.clientId === 'string' ? msg.clientId.slice(0, 40) : null;
+    const reject = (reason, extra) =>
+      send(ws, { type: 'like-reject', seq: seqNo, reason, likes: item ? item.likes : 0, ...(extra || {}) });
+
+    if (!item) return reject('gone');
+    if (!clientId) return reject('no_client');
+    if (item.clientId && item.clientId === clientId) return reject('own');
+
+    if (!client.likedSeqs) client.likedSeqs = new Set();
+    if (client.likedSeqs.has(seqNo)) return reject('duplicate');
+
+    const now = Date.now();
+    if (now - (client.lastLikeAt || 0) < SIGNAL_LIMITS.likeCooldownMs) return reject('too_fast');
+    const recentLikes = (client.likeTimestamps || []).filter((t) => now - t < 60000);
+    if (recentLikes.length >= SIGNAL_LIMITS.likePerMinute) return reject('too_many');
+    if (!takeSignalToken()) return reject('busy');
+
+    client.lastLikeAt = now;
+    client.likeTimestamps = recentLikes.concat(now);
+    client.likedSeqs.add(seqNo);
+    if (client.likedSeqs.size > 300) client.likedSeqs.delete(client.likedSeqs.values().next().value);
+
+    item.likes += 1;
+    const brief = recentItems.find((x) => x.seq === seqNo);
+    if (brief) brief.likes = item.likes;
+
+    broadcastRaw({ type: 'like', seq: seqNo, likes: item.likes });
+    try {
+      onLike({ seq: seqNo, likes: item.likes });
+    } catch (err) {
+      onLog('like-error', err && err.message);
+    }
+  }
+
+  function handleReact(ws, client, msg) {
+    const kind = String(msg.kind || '');
+    if (REACT_KINDS.indexOf(kind) < 0) return send(ws, { type: 'react-reject', reason: 'bad_kind' });
+
+    const now = Date.now();
+    if (now - (client.lastReactAt || 0) < SIGNAL_LIMITS.reactCooldownMs) {
+      return send(ws, { type: 'react-reject', reason: 'too_fast' });
+    }
+    if (!takeSignalToken()) return send(ws, { type: 'react-reject', reason: 'busy' });
+
+    client.lastReactAt = now;
+    signals[kind] += 1;
+    recentSignals.push({ kind, ts: now });
+    if (recentSignals.length > 600) recentSignals.shift();
+
+    const snap = signalSnapshot();
+    broadcastRaw({ type: 'react', kind, signals: snap });
+    try {
+      onSignals(snap);
+    } catch (err) {
+      onLog('react-error', err && err.message);
     }
   }
 
@@ -280,6 +388,7 @@ h1{font-size:20px;margin:0 0 12px}p{color:#98a0b0;margin:0;max-width:22em}</styl
       paused: Boolean(getConfig().paused),
       // 新进来的观众先看到最近几条，避免一片空白
       recent: recentItems.slice(-12),
+      signals: signalSnapshot(),
       serverTs: Date.now()
     });
 
@@ -299,7 +408,13 @@ h1{font-size:20px;margin:0 0 12px}p{color:#98a0b0;margin:0;max-width:22em}</styl
       } catch (_) {
         return ack(ws, null, 'invalid', { reason: 'json' });
       }
-      if (!msg || msg.type !== 'message') return ack(ws, null, 'invalid', { reason: 'type' });
+      if (!msg || typeof msg !== 'object') return ack(ws, null, 'invalid', { reason: 'type' });
+
+      // 轻量信号：点赞 / 快捷反应，不算消息，不走消息限流
+      if (msg.type === 'like') return handleLike(ws, client, msg);
+      if (msg.type === 'react') return handleReact(ws, client, msg);
+
+      if (msg.type !== 'message') return ack(ws, null, 'invalid', { reason: 'type' });
 
       const msgId = typeof msg.msgId === 'string' ? msg.msgId.slice(0, 64) : null;
       if (msgId && client.msgIds.has(msgId)) {
@@ -347,11 +462,16 @@ h1{font-size:20px;margin:0 0 12px}p{color:#98a0b0;margin:0;max-width:22em}</styl
         contentType: verified.contentType,
         payload: verified.payload,
         color: verified.color || null,
+        likes: 0,
         flagged: Boolean(verdict && verdict.flagged),
         flagCategory: (verdict && verdict.category) || null,
         ts: now,
         clientId: typeof msg.clientId === 'string' ? msg.clientId.slice(0, 40) : null
       };
+
+      // 记一份索引，点赞时按 seq 找回来
+      itemsBySeq.set(seq, { seq, clientId: out.clientId, likes: 0 });
+      if (itemsBySeq.size > SEQ_MAX) itemsBySeq.delete(itemsBySeq.keys().next().value);
 
       ack(ws, msgId, 'ok', { seq, retryAfter: interval });
 
@@ -361,6 +481,7 @@ h1{font-size:20px;margin:0 0 12px}p{color:#98a0b0;margin:0;max-width:22em}</styl
         kind: verified.contentType === 'image' ? 'image' : 'text',
         text: verified.contentType === 'text' ? verified.payload : '',
         color: verified.color || null,
+        likes: 0,
         clientId: out.clientId,
         ts: now
       };
@@ -463,6 +584,11 @@ h1{font-size:20px;margin:0 0 12px}p{color:#98a0b0;margin:0;max-width:22em}</styl
 
     online() {
       return clients.size;
+    },
+
+    /** 当前现场信号（累计 + 最近 60 秒） */
+    signals() {
+      return signalSnapshot();
     },
 
     /** 结束一场：先通知客户端，再断开，最后关服务器。 */

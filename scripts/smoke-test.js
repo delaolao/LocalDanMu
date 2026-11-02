@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 服务端冒烟测试（不需要 Electron）：
@@ -54,6 +54,8 @@ function wrap(ws) {
     } catch (_) {
       return;
     }
+    // item / like / react 是广播，不是对本次请求的应答；留在队列里会把 ack 挤错位
+    if (msg && (msg.type === 'item' || msg.type === 'like' || msg.type === 'react')) return;
     if (waiters.length) waiters.shift()(msg);
     else queue.push(msg);
   });

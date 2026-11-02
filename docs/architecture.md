@@ -1,4 +1,4 @@
-# 培训弹幕 · 实现文档
+﻿# 培训弹幕 · 实现文档
 
 > 对应需求：**《线下培训弹幕互动平台（自建私密版）需求方案 v1.0》**
 > 代码版本：`v0.1.3`（仓库 <https://github.com/delaolao/LocalDanMu>）
@@ -437,7 +437,29 @@ server: recentItems（环形缓冲 24 条，图片只存占位）
 
 **图片不广播原图**：一张手机照片可能 300KB，100 台就是 30MB 突发。手机端只显示「🖼 图片」占位块。
 
-### 5.10 词云
+### 5.10 点赞与快捷反应
+
+两类"轻量信号"，共用一条 WS 通道和一套节流参数，都不计入消息总数、也不进历史正文。
+
+**点赞**
+
+- 观众在手机「现场流」里点别人消息旁的 ♥；自己的消息不显示按钮。
+- 服务端按 `seq` 找回消息，先用 `clientId` 去重（同一设备对同一条只算一次），再走节流：250ms 间隔、每人 30 次/分钟、全局 25 次/秒。
+- 计数存在 `itemsBySeq`（只留最近 400 条）上，同时同步到 `recentItems` 和主进程 `history`——手机、词云、控制面板看到的是同一份数字。
+- 大屏：这条还在屏上时，末尾直接补 `♥N`；已经滚走的，点赞数跨过 5 / 10 / 20 / 50 时重新推一次并打「共鸣」标记，15 秒内只触发一次，讲师可在面板用 `autoReplay` 关掉。
+
+**快捷反应**
+
+- 三种固定语义：`agree` / `confused` / `slow`，手机端三个常驻按钮，2 秒冷却。
+- 只做计数：`signals.total` 是累计值，`signals.recent` 是最近 60 秒窗口，控制面板的「现场信号」卡片用条形图展示。
+- 不写进弹幕流，所以不会把大屏刷满，也不会挤占消息限流额度。
+
+**词云**
+
+- 词频 = 出现次数 + `log2(1 + 赞数) × 0.8`。用对数是为了让高赞有优势，但不至于一条消息统治全场。
+- 词云页右侧新增「共鸣 TOP5」，直接按点赞数排序展示原文。
+
+### 5.11 词云
 
 `words.js` 的切分规则：
 
@@ -448,7 +470,7 @@ server: recentItems（环形缓冲 24 条，图片只存占位）
 
 已知局限：**不做同义词合并**（"难"和"太难"算两个词），现场引导大家发短词效果最好。
 
-### 5.11 隐私与落盘
+### 5.12 隐私与落盘
 
 | 数据 | 存放位置 | 生命周期 |
 | --- | --- | --- |
@@ -459,7 +481,7 @@ server: recentItems（环形缓冲 24 条，图片只存占位）
 
 没有任何外发请求（除了「打开网络设置」「打开仓库」这两个用户主动点击的动作）。
 
-### 5.12 打包与分发
+### 5.13 打包与分发
 
 `electron-builder` 一次构建出三种形态：
 
@@ -482,18 +504,24 @@ server: recentItems（环形缓冲 24 条，图片只存占位）
 
 | `type` | 何时 | 主要字段 |
 | --- | --- | --- |
-| `hello` | 连接建立 | `proto`、`intervalSec`、`paused`、`recent[]`、`serverTs` |
+| `hello` | 连接建立 | `proto`、`intervalSec`、`paused`、`recent[]`、`signals`、`serverTs` |
 | `ack` | 收到一条 message | `msgId`、`status`（ok/invalid/too_fast）、`seq`、`retryAfter`、`reason` |
 | `item` | 有消息通过校验 | `seq`、`kind`（text/image）、`text`、`color`、`clientId`、`ts` |
 | `config` | 讲师改设置 | `intervalSec` |
 | `paused` | 暂停/恢复 | `paused` |
 | `session_end` | 结束培训 | `reason` |
+| `like` | 有人点赞 | `seq`、`likes`（广播给所有人） |
+| `like-reject` | 点赞被拒 | `seq`、`reason`（gone/own/duplicate/too_fast/too_many/busy）、`likes` |
+| `react` | 有人点了快捷反应 | `kind`（agree/confused/slow）、`signals`（累计 + 最近 60 秒） |
+| `react-reject` | 反应被拒 | `reason`（bad_kind/too_fast/busy） |
 
 ### 6.2 WebSocket 消息（客户端 → 服务端）
 
 | `type` | 字段 |
 | --- | --- |
 | `message` | `msgId`、`contentType`（text/image）、`payload`、`color`、`clientId`、`ts` |
+| `like` | `seq`、`clientId`（同一设备对同一条只算一次） |
+| `react` | `kind`（agree/confused/slow） |
 
 ### 6.3 IPC 通道（渲染层 ↔ 主进程）
 
@@ -528,6 +556,7 @@ server: recentItems（环形缓冲 24 条，图片只存占位）
 | `wifiSsid` / `wifiPassword` | string | '' | 现场 WiFi（显示在引导页） |
 | `mode` | scroll/cloud | scroll | 投影模式 |
 | `filterLevel` | off/mark/block | block | 过滤强度 |
+| `autoReplay` | bool | true | 高赞弹幕是否自动重新上屏 |
 | `customWords` | string ≤6000 | '' | 自定义词表（换行分隔） |
 
 ---
@@ -576,6 +605,7 @@ app.whenReady()
 | 文字有颜色区别 | 8 色白名单，观众自选/随机 | 冒烟颜色断言 |
 | 图片点击不灵敏 | 16px 外扩命中 + 两条点击路径 + 180ms 去重 | `probe-click.ps1` |
 | 关键词过滤词典 | `filter.js`：5 条正则 + 48 词 + 自定义/导入 | `test-filter.js`（13 例） |
+| 增强：点赞 / 快捷反应 | `server.js` 的 `handleLike` / `handleReact`、`danmaku.js` 的 ♥N、控制面板「现场信号」 | 冒烟 `signals` / `likeAfter` 断言 |
 | 版权信息 | 控制面板头部 + 引导页/词云页底部 | 截图 |
 | MyPassword 风格 | 深墨绿 + 薄荷配色 token，深浅两套 | 截图 |
 

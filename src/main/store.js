@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 极简配置存储：只保存设置项（限流间隔、字号、速度…），
@@ -22,7 +22,9 @@ const SCHEMA = {
   wifiPassword: { type: 'string', max: 64, def: '' },
   mode: { type: 'enum', values: ['scroll', 'cloud'], def: 'scroll' },
   filterLevel: { type: 'enum', values: ['off', 'mark', 'block'], def: 'block' },
-  customWords: { type: 'string', max: 6000, def: '' }
+  customWords: { type: 'string', max: 6000, def: '' },
+  // 高赞弹幕是否自动重新上屏（讲师可关掉，避免打断）
+  autoReplay: { type: 'bool', def: true }
 };
 
 function sanitize(key, value) {
@@ -35,6 +37,12 @@ function sanitize(key, value) {
   }
   if (rule.type === 'enum') {
     return rule.values.includes(value) ? value : rule.def;
+  }
+  if (rule.type === 'bool') {
+    if (typeof value === 'boolean') return value;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return rule.def;
   }
   if (rule.type === 'string') {
     const s = String(value == null ? '' : value)

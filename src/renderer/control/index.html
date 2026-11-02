@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN" data-theme="system">
   <head>
     <meta charset="utf-8" />
@@ -55,6 +55,31 @@
         <div class="stat"><b id="online">0</b><span>在线人数</span></div>
         <div class="stat"><b id="total">0</b><span>已收到</span></div>
         <div class="stat"><b id="room">—</b><span>房间号</span></div>
+      </section>
+
+      <section class="card signal-card">
+        <div class="signal-head">
+          <span>现场信号</span>
+          <label class="switch" title="点赞数跨过 5/10/20/50 时把这条重新推上屏">
+            <input type="checkbox" id="autoReplay" checked />
+            <span>高赞自动复现</span>
+          </label>
+        </div>
+        <div class="signal-row">
+          <span class="signal-name">👍 同意</span>
+          <div class="signal-bar"><i id="barAgree"></i></div>
+          <b class="signal-num" id="sigAgree">0</b>
+        </div>
+        <div class="signal-row">
+          <span class="signal-name">🙋 没懂</span>
+          <div class="signal-bar warn"><i id="barConfused"></i></div>
+          <b class="signal-num" id="sigConfused">0</b>
+        </div>
+        <div class="signal-row">
+          <span class="signal-name">🐢 慢一点</span>
+          <div class="signal-bar soft"><i id="barSlow"></i></div>
+          <b class="signal-num" id="sigSlow">0</b>
+        </div>
       </section>
 
       <section class="actions">

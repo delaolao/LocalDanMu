@@ -9,8 +9,8 @@
     <meta name="format-detection" content="telephone=no,date=no,address=no,email=no" />
     <meta name="theme-color" content="#0f1117" />
     <title>培训互动</title>
-    <script src="/assets/theme-boot.js?v=0.1.5"></script>
-    <link rel="stylesheet" href="/assets/style.css?v=0.1.5" />
+    <script src="/assets/theme-boot.js?v=0.1.6"></script>
+    <link rel="stylesheet" href="/assets/style.css?v=0.1.6" />
   </head>
   <body>
     <div class="app" id="app">
@@ -33,6 +33,12 @@
         </section>
 
         <div class="hint" id="hint">每人每 5 秒可发 1 条</div>
+
+        <div class="reacts" id="reacts" role="group" aria-label="快捷反应">
+          <button class="react" type="button" data-kind="agree"><span class="ico">👍</span>同意<i class="n" id="nAgree"></i></button>
+          <button class="react" type="button" data-kind="confused"><span class="ico">🙋</span>没懂<i class="n" id="nConfused"></i></button>
+          <button class="react" type="button" data-kind="slow"><span class="ico">🐢</span>慢一点<i class="n" id="nSlow"></i></button>
+        </div>
 
         <div class="colors" id="colors" role="group" aria-label="弹幕颜色">
           <button class="swatch auto active" type="button" data-color="auto">随机</button>
@@ -79,6 +85,6 @@
 
     <div class="toast" id="toast" hidden></div>
 
-    <script src="/assets/app.js?v=0.1.5"></script>
+    <script src="/assets/app.js?v=0.1.6"></script>
   </body>
 </html>
