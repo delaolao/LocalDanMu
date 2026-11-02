@@ -1,11 +1,12 @@
-﻿'use strict';
+'use strict';
 // 观众端在窄屏下的布局检查：按几种手机宽度截图，并量出色彩行的实际几何
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
 const TOKEN = process.argv[2] || 'layout';
-const URL = `http://127.0.0.1:8080/j/${TOKEN}`;
+const PORT = Number(process.env.LDM_PORT || 8080);
+const URL = `http://127.0.0.1:${PORT}/j/${TOKEN}`;
 const WIDTHS = process.argv[3] ? [Number(process.argv[3])] : [320, 360, 390, 414];
 
 app.whenReady().then(async () => {

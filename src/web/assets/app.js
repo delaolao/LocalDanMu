@@ -75,6 +75,35 @@
     }
   })();
 
+  /**
+   * 颜色行按可用宽度自动定尺寸：始终保持一行、始终是正圆。
+   * 不同手机的字体缩放会把"随机"这个胶囊撑宽，所以这里按实际渲染宽度算，而不是写死。
+   */
+  function layoutColors() {
+    var row = $('colors');
+    if (!row) return;
+    var auto = row.querySelector('.swatch.auto');
+    var swatches = row.querySelectorAll('.swatch:not(.auto)');
+    if (!swatches.length) return;
+
+    var gap = 8;
+    try {
+      var cs = window.getComputedStyle(row);
+      gap = parseFloat(cs.columnGap || cs.gap) || gap;
+    } catch (e) {
+      /* 老内核取不到就用默认值 */
+    }
+    var autoW = auto ? auto.offsetWidth : 0;
+    var available = row.clientWidth - autoW - gap * swatches.length - 2; // 留 2px 余量，避免亚像素误差导致横向溢出
+    var size = Math.floor(available / swatches.length);
+    if (!isFinite(size)) return;
+    size = Math.max(18, Math.min(28, size));
+    for (var i = 0; i < swatches.length; i += 1) {
+      swatches[i].style.width = size + 'px';
+      swatches[i].style.height = size + 'px';
+    }
+  }
+
   function paintSwatches() {
     var nodes = document.querySelectorAll('#colors .swatch');
     for (var i = 0; i < nodes.length; i += 1) {
@@ -881,9 +910,19 @@
         /* 无痕模式忽略 */
       }
       paintSwatches();
+  layoutColors();
+  window.addEventListener('resize', function () {
+    setTimeout(layoutColors, 80);
+  });
+  window.addEventListener('load', layoutColors);
     });
   }
   paintSwatches();
+  layoutColors();
+  window.addEventListener('resize', function () {
+    setTimeout(layoutColors, 80);
+  });
+  window.addEventListener('load', layoutColors);
 
   connect();
 })();
