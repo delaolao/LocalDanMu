@@ -1,53 +1,103 @@
-# 一键打包（国内网络）：安装包 + 单文件便携版 + 绿色解压版
+# Build Windows artifacts: NSIS installer + single-exe green build.
 #
-# 用法：npm run dist:cn
-#   或： powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-win.ps1
+# Usage:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-win.ps1
+#   ... -SkipBundle        # only build the exe, skip NSIS packaging
 #
-# 产物：
-#   dist\LocalDanMu-Setup-<ver>.exe        安装版
-#   dist\LocalDanMu-Portable-<ver>.exe     单文件便携版（双击即用）
-#   dist\LocalDanMu-<ver>-win-x64.zip      绿色解压版（解压后双击 LocalDanMu.exe）
+# Artifacts (in dist\):
+#   LocalDanMu-Setup-<ver>.exe   NSIS installer, per-user, start-menu shortcut
+#   LocalDanMu-<ver>-green.zip   exe + portable.txt + README.txt, unzip and run
+#
+# Notes for a fresh machine (this is what actually bites in China):
+#   - crates.io goes through a mirror (see ~/.cargo/config.toml).
+#   - `cargo tauri build` wants to download NSIS from GitHub, which times out.
+#     Pre-seed the toolchain once:
+#       %LOCALAPPDATA%\tauri\NSIS\makensis.exe
+#       %LOCALAPPDATA%\tauri\NSIS\Plugins\x86-unicode\additional\nsis_tauri_utils.dll
+#     (sha1 75197FEE3C6A814FE035788D1C34EAD39349B860)
+#     The bundler validates exactly that DLL; if it is missing it wipes the
+#     directory and re-downloads. This script checks for it and says so.
+#
+# ASCII-only on purpose: Windows PowerShell 5.1 parses .ps1 as ANSI.
+
+param(
+  [switch]$SkipBundle
+)
 
 $ErrorActionPreference = 'Stop'
-
-# 国内直连 GitHub 拉 Electron / NSIS 会超时，统一走镜像
-$env:ELECTRON_BUILDER_BINARIES_MIRROR = 'https://npmmirror.com/mirrors/electron-builder-binaries/'
-$env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'
-if (Test-Path Env:ELECTRON_RUN_AS_NODE) { Remove-Item Env:ELECTRON_RUN_AS_NODE }
-
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
 try {
-    npx electron-builder --win
-    if ($LASTEXITCODE -ne 0) { throw "electron-builder 失败（退出码 $LASTEXITCODE）" }
+    $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
-    $pkg = Get-Content package.json -Raw | ConvertFrom-Json
-    $version = $pkg.version
-    $name = "LocalDanMu-$version-win-x64"
-    $src = Join-Path $root 'dist\win-unpacked'
-    $dst = Join-Path $root "dist\$name"
-    $zip = Join-Path $root "dist\$name.zip"
+    $manifest = Join-Path $root 'src-tauri\Cargo.toml'
+    $version = (Select-String -Path $manifest -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+    if (-not $version) { throw "cannot read version from $manifest" }
+    Write-Host "version: $version"
 
-    if (-not (Test-Path $src)) { throw "找不到 $src" }
-    if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
-    if (Test-Path $zip) { Remove-Item $zip -Force }
-
-    Copy-Item $src $dst -Recurse
-
-    # 便携标记：程序看到它就把 settings.json 写在 exe 旁边
-    Set-Content -Path (Join-Path $dst 'portable.txt') -Value 'portable' -Encoding ASCII
-    Copy-Item (Join-Path $root 'README.md') (Join-Path $dst 'README.txt')
-
-    # 系统自带 tar（bsdtar）打 zip，比 Compress-Archive 快一个数量级
-    & tar.exe -a -c -f $zip -C $dst .
-    if ($LASTEXITCODE -ne 0) {
-        Compress-Archive -Path (Join-Path $dst '*') -DestinationPath $zip -Force
+    $nsisDir = Join-Path $env:LOCALAPPDATA 'tauri\NSIS'
+    $nsisPlugin = Join-Path $nsisDir 'Plugins\x86-unicode\additional\nsis_tauri_utils.dll'
+    if (-not (Test-Path (Join-Path $nsisDir 'makensis.exe')) -or -not (Test-Path $nsisPlugin)) {
+        Write-Host ''
+        Write-Host 'WARNING: local NSIS toolchain is incomplete.' -ForegroundColor Yellow
+        Write-Host '         The bundler will try to download it from GitHub and probably time out.'
+        Write-Host '         See the header of this script for the two files it needs.'
+        Write-Host ''
     }
 
+    Push-Location (Join-Path $root 'src-tauri')
+    try {
+        if ($SkipBundle) {
+            & cargo build --release
+            if ($LASTEXITCODE -ne 0) { throw "cargo build failed ($LASTEXITCODE)" }
+        } else {
+            & cargo tauri build --bundles nsis
+            if ($LASTEXITCODE -ne 0) { throw "cargo tauri build failed ($LASTEXITCODE)" }
+        }
+    } finally {
+        Pop-Location
+    }
+
+    $exe = Join-Path $root 'src-tauri\target\release\localdanmu.exe'
+    if (-not (Test-Path $exe)) { throw "missing $exe" }
+
+    $dist = Join-Path $root 'dist'
+    New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+    # ---- green build: one exe + a portable marker ------------------------
+    $greenDir = Join-Path $dist 'green'
+    if (Test-Path $greenDir) { Remove-Item $greenDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $greenDir | Out-Null
+    Copy-Item $exe (Join-Path $greenDir 'LocalDanMu.exe')
+    # Marker: makes the app keep settings.json next to the exe instead of AppData.
+    Set-Content -Path (Join-Path $greenDir 'portable.txt') -Value 'portable' -Encoding ASCII
+    if (Test-Path (Join-Path $root 'README.md')) {
+        Copy-Item (Join-Path $root 'README.md') (Join-Path $greenDir 'README.txt')
+    }
+    $zip = Join-Path $dist "LocalDanMu-$version-green.zip"
+    if (Test-Path $zip) { Remove-Item $zip -Force }
+    & tar.exe -a -c -f $zip -C $greenDir .
+    if ($LASTEXITCODE -ne 0) {
+        Compress-Archive -Path (Join-Path $greenDir '*') -DestinationPath $zip -Force
+    }
+
+    # ---- report ---------------------------------------------------------
+    $setup = Join-Path $root "src-tauri\target\release\bundle\nsis\LocalDanMu_${version}_x64-setup.exe"
     Write-Host ''
-    Write-Host "安装包   : dist\LocalDanMu-Setup-$version.exe"
-    Write-Host "单文件版 : dist\LocalDanMu-Portable-$version.exe"
-    Write-Host "绿色版   : dist\$name.zip"
+    Write-Host '========================= artifacts ========================='
+    $exeMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+    Write-Host ("  exe     : {0} ({1} MB)" -f 'src-tauri\target\release\localdanmu.exe', $exeMb)
+    if (Test-Path $setup) {
+        $setupMb = [math]::Round((Get-Item $setup).Length / 1MB, 2)
+        $named = Join-Path $dist "LocalDanMu-Setup-$version.exe"
+        Copy-Item $setup $named -Force
+        Write-Host ("  setup   : {0} ({1} MB)" -f "dist\LocalDanMu-Setup-$version.exe", $setupMb)
+    }
+    if (Test-Path $zip) {
+        $zipMb = [math]::Round((Get-Item $zip).Length / 1MB, 2)
+        Write-Host ("  green   : {0} ({1} MB)" -f "dist\LocalDanMu-$version-green.zip", $zipMb)
+    }
+    Write-Host '============================================================='
 } finally {
     Pop-Location
 }

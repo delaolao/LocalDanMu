@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "所有窗口的默认能力：只开核心事件与自绘命令，不开放任何文件系统/网络原语",
+  "windows": ["*"],
+  "permissions": ["core:default"]
+}

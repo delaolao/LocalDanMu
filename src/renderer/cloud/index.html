@@ -1,8 +1,8 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost" />
     <title>词云</title>
     <link rel="stylesheet" href="cloud.css" />
   </head>
@@ -49,6 +49,7 @@
       <span>teacherGeng programs with DSH.</span>
     </footer>
 
+    <script src="shim.js"></script>
     <script src="words.js"></script>
     <script src="cloud.js"></script>
   </body>

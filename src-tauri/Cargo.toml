@@ -1,0 +1,59 @@
+[package]
+name = "localdanmu"
+version = "0.2.0"
+description = "线下培训弹幕互动平台（局域网自建版，数据不出本机）"
+authors = ["LocalDanMu"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77.2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Tauri 官方插件：托盘之外的系统能力
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+
+# 会话服务：HTTP 与 WebSocket 共用 listener（旧版 ws + node:http 的等价物）
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
+
+# 内容过滤
+regex = "1"
+aho-corasick = "1"
+unicode-normalization = "0.1"
+
+# 二维码（纯 Rust，替代旧版的 npm qrcode）
+qrcode = { version = "0.14", default-features = false }
+png = "0.18"
+base64 = "0.22"
+
+# 观众端 H5 内嵌进 exe（旧版是散落在 src/web 的静态文件）
+rust-embed = "8"
+
+# 网卡枚举
+if-addrs = "0.13"
+
+# 房间口令的随机性
+getrandom = "0.3"
+
+[dev-dependencies]
+# 协议级集成测试：不开 GUI 也能验证 WS 契约
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+
+# 体积优化：Tauri 应用最终是「一个几 MB 的 exe」，这些开关很关键
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

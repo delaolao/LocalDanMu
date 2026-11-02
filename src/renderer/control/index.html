@@ -1,13 +1,13 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN" data-theme="system">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost" />
     <title>培训弹幕</title>
     <link rel="stylesheet" href="control.css" />
   </head>
   <body>
-    <header class="titlebar">
+    <header class="titlebar" data-tauri-drag-region>
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 64 64" width="24" height="24">
@@ -208,6 +208,7 @@
 
     <div class="toast" id="toast" hidden></div>
 
+    <script src="shim.js"></script>
     <script src="control.js"></script>
   </body>
 </html>

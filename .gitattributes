@@ -1,5 +1,11 @@
 * text=auto eol=lf
+
+# Binaries
 *.png binary
 *.ico binary
 *.zip binary
 *.exe binary
+
+# PowerShell scripts must stay CRLF-free and ASCII-only (see docs/architecture.md
+# pitfall 7): Windows PowerShell 5.1 parses .ps1 as ANSI when there is no BOM.
+*.ps1 text eol=lf
