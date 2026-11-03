@@ -1,0 +1,16 @@
+[package]
+name = "ipv6-check"
+version = "0.1.0"
+edition = "2021"
+description = "现场 IPv6 入站可达性自检：找出本机公网 IPv6，起一个临时 HTTP 服务，用手机流量扫码验证"
+
+[dependencies]
+qrcode = { version = "0.14", default-features = false }
+if-addrs = "0.13"
+
+# 体积优先：这是一个现场用的单文件小工具
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"

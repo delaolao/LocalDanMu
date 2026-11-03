@@ -18,3 +18,6 @@
 *.swp
 Thumbs.db
 desktop.ini
+
+# 工具 crate 的构建产物
+/tools/**/target/
