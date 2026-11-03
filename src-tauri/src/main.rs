@@ -1,4 +1,4 @@
-﻿//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
+//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
 //!
 //! 对应旧版 `src/main/main.js`。这里只做**编排**，业务都在各模块里：
 //! - `settings`  设置项持久化（白名单 + 防抖落盘 + 便携模式）
@@ -16,6 +16,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod core;
+mod crypto;
 mod filter;
 mod network;
 mod qr;
@@ -105,9 +106,11 @@ fn main() {
 
             let data_dir = settings::resolve_data_dir();
             let store = Store::open(data_dir.join("settings.json"));
-            let core = AppCore::new(store);
+            // 远程模式的端到端密钥槽：Tunnel 写入，服务端按连接读取
+            let remote_key = crypto::new_slot();
+            let core = AppCore::new(store, remote_key.clone());
             app.manage(Arc::clone(&core));
-            app.manage(Tunnel::new());
+            app.manage(Tunnel::new(remote_key));
 
             // 窗口先出来，讲师有东西可看
             windows::create_control(&handle)?;

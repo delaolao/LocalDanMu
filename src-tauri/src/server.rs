@@ -239,6 +239,7 @@ pub struct ServerState {
     sink: Arc<dyn MessageSink>,
     online: Arc<AtomicUsize>,
     tx: broadcast::Sender<String>,
+    remote_key: crate::crypto::RemoteKey,
 }
 
 impl ServerState {
@@ -518,6 +519,9 @@ async fn healthz() -> Response {
 #[derive(Deserialize)]
 struct WsQuery {
     t: Option<String>,
+    /// 客户端声明「我能解密」，只有带这个参数的连接才启用端到端加密。
+    /// 这样讲师在本机用局域网地址自测（回环、无密钥）仍然是明文，不会被误判。
+    enc: Option<String>,
 }
 
 async fn ws_handler(
@@ -526,11 +530,12 @@ async fn ws_handler(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let enc = q.enc.as_deref() == Some("1");
     if !timing_safe_eq(&q.t.unwrap_or_default(), &st.token) {
         return respond(StatusCode::UNAUTHORIZED, b"Unauthorized".to_vec(), "text/plain; charset=utf-8");
     }
     ws.max_message_size(MAX_MESSAGE_BYTES)
-        .on_upgrade(move |socket| handle_socket(socket, st, peer.ip()))
+        .on_upgrade(move |socket| handle_socket(socket, st, peer.ip(), enc))
 }
 
 /// 每条连接自己的会话状态（不共享、不过锁）。
@@ -548,7 +553,7 @@ async fn send_json(socket: &mut WebSocket, payload: &Value) {
     let _ = socket.send(Message::Text(payload.to_string().into())).await;
 }
 
-async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr) {
+async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr, wants_enc: bool) {
     let mut conn = Conn {
         last_sent_at: None,
         msg_ids: VecDeque::new(),
@@ -557,6 +562,14 @@ async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr) {
         like_timestamps: VecDeque::new(),
         last_react_at: None,
         client_id: random_token(10),
+    };
+
+    // 只有隧道转发进来的连接（对端是回环地址）才启用端到端加密。
+    // 局域网连接保持明文：零开销，且不改变原有协议。
+    let enc_key = if wants_enc && ip.is_loopback() {
+        crate::crypto::get_key(&st.remote_key)
+    } else {
+        None
     };
 
     // hello：带上最近几条，避免新进来的观众看到一片空白
@@ -575,7 +588,11 @@ async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr) {
             "serverTs": now_ms(),
         })
     };
-    if socket.send(Message::Text(hello.to_string().into())).await.is_err() {
+    let hello_text = match enc_key {
+        Some(k) => crate::crypto::wrap(&k, &hello.to_string()).unwrap_or_else(|| hello.to_string()),
+        None => hello.to_string(),
+    };
+    if socket.send(Message::Text(hello_text.into())).await.is_err() {
         return;
     }
 
@@ -598,7 +615,27 @@ async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr) {
                 last_seen = Instant::now();
                 match frame {
                     Message::Text(text) => {
-                        handle_client_text(&mut socket, &st, ip, text.as_str(), &mut conn).await;
+                        let plain = match enc_key {
+                            Some(k) => match crate::crypto::unwrap(&k, text.as_str()) {
+                                Some(p) => p,
+                                None => {
+                                    // 远程连接必须携带正确信封，否则拒绝
+                                    let _ = socket
+                                        .send(Message::Text(
+                                            json!({
+                                                "type": "ack", "msgId": Value::Null,
+                                                "status": "invalid", "reason": "bad_enc"
+                                            })
+                                            .to_string()
+                                            .into(),
+                                        ))
+                                        .await;
+                                    continue;
+                                }
+                            },
+                            None => text.to_string(),
+                        };
+                        handle_client_text(&mut socket, &st, ip, plain.as_str(), &mut conn).await;
                     }
                     Message::Binary(_) => {
                         send_json(&mut socket, &json!({
@@ -613,7 +650,11 @@ async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr) {
 
             broadcast = rx.recv() => {
                 if let Ok(text) = broadcast {
-                    if socket.send(Message::Text(text.into())).await.is_err() {
+                    let out = match enc_key {
+                        Some(k) => crate::crypto::wrap(&k, &text).unwrap_or(text),
+                        None => text,
+                    };
+                    if socket.send(Message::Text(out.into())).await.is_err() {
                         break;
                     }
                 }
@@ -958,6 +999,8 @@ pub struct BridgeConfig {
     pub sink: Arc<dyn MessageSink>,
     /// 0 表示让系统分配端口（测试用）
     pub preferred_port: u16,
+    /// 远程模式（隧道）的端到端密钥；None 时一切照旧走明文
+    pub remote_key: crate::crypto::RemoteKey,
 }
 
 pub struct Bridge {
@@ -994,6 +1037,7 @@ impl Bridge {
             sink: Arc::clone(&cfg.sink),
             online,
             tx,
+            remote_key: Arc::clone(&cfg.remote_key),
         };
 
         let app = Router::new()
@@ -1121,6 +1165,7 @@ mod tests {
             filter: Some(Filter::new(Level::Block, "")),
             sink: sink.clone(),
             preferred_port: 0,
+            remote_key: crate::crypto::new_slot(),
         })
         .await
         .expect("测试服务应当能起来");

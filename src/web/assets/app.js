@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 观众端（手机 H5）
@@ -20,6 +20,79 @@
   };
 
   var PROTO = 1; // 与 server.js 的 hello.proto 对应
+
+  /* ------------------------------------------------------- 端到端加密 */
+
+  // 通过 Cloudflare Tunnel 进来时，二维码里带 #k=<32字节>；fragment 不会发给服务器，
+  // 所以 Cloudflare 看不到密钥，也就解不开消息内容。局域网访问没有这个参数，全程明文。
+  var CRYPTO_KEY = null;
+
+  function b64ToBytes(s) {
+    var norm = String(s).replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
+    while (norm.length % 4) norm += '=';
+    var bin = atob(norm);
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function bytesToB64(buf) {
+    var bytes = new Uint8Array(buf);
+    var s = '';
+    for (var i = 0; i < bytes.length; i += 1) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  function readKeyFragment() {
+    var m = String(location.hash || '').match(/[#&]k=([A-Za-z0-9_-]+)/);
+    return m ? m[1] : '';
+  }
+
+  function initKey() {
+    var frag = readKeyFragment();
+    if (!frag) return Promise.resolve();
+    if (!window.crypto || !window.crypto.subtle) return Promise.resolve();
+    var raw;
+    try {
+      raw = b64ToBytes(frag);
+    } catch (e) {
+      return Promise.resolve();
+    }
+    if (raw.length !== 32) return Promise.resolve();
+    return crypto.subtle
+      .importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+      .then(function (k) {
+        CRYPTO_KEY = k;
+      })
+      .catch(function () {
+        CRYPTO_KEY = null;
+      });
+  }
+
+  /** 统一出口：有密钥就加密成 {type:'enc'} 信封，没有就原样发 */
+  function sendPacket(obj) {
+    if (!ws) return false;
+    var text = JSON.stringify(obj);
+    if (!CRYPTO_KEY) {
+      ws.send(text);
+      return true;
+    }
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    var data = new TextEncoder().encode(text);
+    crypto.subtle
+      .encrypt({ name: 'AES-GCM', iv: iv }, CRYPTO_KEY, data)
+      .then(function (sealed) {
+        try {
+          ws.send(JSON.stringify({ type: 'enc', iv: bytesToB64(iv), data: bytesToB64(sealed) }));
+        } catch (e) {
+          /* 连接已断，交给重连逻辑 */
+        }
+      })
+      .catch(function () {
+        /* 加密失败就不发，宁可不发也不泄漏明文 */
+      });
+    return true;
+  }
 
   // 通过 Cloudflare Tunnel 进来时是 https：延迟更高、且建议少发图
   var IS_REMOTE = location.protocol === 'https:';
@@ -207,8 +280,7 @@
   function sendSignal(obj) {
     if (!state.connected || !ws) return false;
     try {
-      ws.send(JSON.stringify(obj));
-      return true;
+      return sendPacket(obj);
     } catch (e) {
       return false;
     }
@@ -472,7 +544,13 @@
     }
 
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    var url = proto + '//' + location.host + '/ws?t=' + encodeURIComponent(TOKEN);
+    var url =
+      proto +
+      '//' +
+      location.host +
+      '/ws?t=' +
+      encodeURIComponent(TOKEN) +
+      (CRYPTO_KEY ? '&enc=1' : '');
 
     setStatus('', IS_REMOTE ? '正在连接远程会场…' : '连接中…');
     try {
@@ -494,6 +572,28 @@
       try {
         msg = JSON.parse(event.data);
       } catch (e) {
+        return;
+      }
+      if (msg && msg.type === 'enc') {
+        if (!CRYPTO_KEY) return;
+        var iv;
+        var data;
+        try {
+          iv = b64ToBytes(msg.iv);
+          data = b64ToBytes(msg.data);
+        } catch (e) {
+          return;
+        }
+        crypto.subtle
+          .decrypt({ name: 'AES-GCM', iv: iv }, CRYPTO_KEY, data)
+          .then(function (plain) {
+            try {
+              handleMessage(JSON.parse(new TextDecoder().decode(plain)));
+            } catch (e) {
+              /* 坏包忽略 */
+            }
+          })
+          .catch(function () {});
         return;
       }
       handleMessage(msg);
@@ -665,17 +765,15 @@
       state.pending.reject = settle(reject);
 
       try {
-        ws.send(
-          JSON.stringify({
-            type: 'message',
-            msgId: msgId,
-            contentType: contentType,
-            payload: payload,
-            color: color || null,
-            clientId: CID,
-            ts: Date.now()
-          })
-        );
+        sendPacket({
+          type: 'message',
+          msgId: msgId,
+          contentType: contentType,
+          payload: payload,
+          color: color || null,
+          clientId: CID,
+          ts: Date.now()
+        });
       } catch (e) {
         state.pending = null;
         clearTimeout(timer);
@@ -928,5 +1026,7 @@
   });
   window.addEventListener('load', layoutColors);
 
-  connect();
+  initKey().then(function () {
+    connect();
+  });
 })();

@@ -42,16 +42,19 @@ struct Inner {
 pub struct Tunnel {
     inner: Mutex<Inner>,
     busy: AtomicBool,
+    /// 端到端密钥槽：开启时写入，关闭时清空（与 server 共享）
+    key: crate::crypto::RemoteKey,
 }
 
 impl Tunnel {
-    pub fn new() -> Arc<Self> {
+    pub fn new(key: crate::crypto::RemoteKey) -> Arc<Self> {
         Arc::new(Self {
             inner: Mutex::new(Inner {
                 status: "idle".into(),
                 ..Default::default()
             }),
             busy: AtomicBool::new(false),
+            key,
         })
     }
 
@@ -95,6 +98,8 @@ impl Tunnel {
             let result = me.run(&app2, port, &token);
             me.busy.store(false, Ordering::SeqCst);
             if let Err(err) = result {
+                // 失败时把密钥清掉，避免留下一个没人知道的密钥
+                crate::crypto::set_key(&me.key, None);
                 me.set(&app2, "error", None, &err);
             }
         });
@@ -103,6 +108,11 @@ impl Tunnel {
     fn run(self: &Arc<Self>, app: &AppHandle, port: u16, token: &str) -> Result<(), String> {
         let bin = ensure_binary(app, self)?;
         self.set(app, "starting", None, "正在建立隧道…");
+
+        // 每次开启生成一把新密钥；URL 里带 #k=，它不会发给 Cloudflare
+        let key = crate::crypto::random_key();
+        crate::crypto::set_key(&self.key, Some(key));
+        let frag = crate::crypto::key_to_fragment(&key);
 
         #[allow(unused_mut)]
         let mut child = Command::new(&bin)
@@ -137,6 +147,7 @@ impl Tunnel {
         let me2 = Arc::clone(self);
         let app2 = app.clone();
         let token = token.to_string();
+        let frag = frag.clone();
         let url_re = regex::Regex::new(r"https://[a-z0-9-]+\.trycloudflare\.com").unwrap();
 
         let reader = std::thread::spawn(move || {
@@ -147,7 +158,7 @@ impl Tunnel {
                         if let Some(m) = url_re.find(&line) {
                             found = true;
                             let base = m.as_str().to_string();
-                            let join = format!("{base}/j/{token}");
+                            let join = format!("{base}/j/{token}#k={frag}");
                             me2.set(&app2, "running", Some(join), "隧道已就绪，手机用流量可访问");
                         }
                     }
@@ -214,6 +225,7 @@ impl Tunnel {
         {
             g.job = None;
         }
+        crate::crypto::set_key(&self.key, None);
         let was = g.status.clone();
         let mut g2 = g;
         g2.status = "idle".into();
@@ -238,6 +250,7 @@ impl Tunnel {
         {
             g.job = None;
         }
+        crate::crypto::set_key(&self.key, None);
     }
 }
 

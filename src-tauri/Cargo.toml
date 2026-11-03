@@ -31,6 +31,9 @@ regex = "1"
 aho-corasick = "1"
 unicode-normalization = "0.1"
 
+# 远程模式的端到端加密（AES-256-GCM）
+aes-gcm = "0.10"
+
 # 二维码（纯 Rust，替代旧版的 npm qrcode）
 qrcode = { version = "0.14", default-features = false }
 png = "0.18"

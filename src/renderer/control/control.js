@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -317,7 +317,7 @@
     if (note) {
       note.textContent =
         t.message ||
-        '场地 WiFi 不稳定时，让学员用手机流量扫码进入。数据会经过 Cloudflare，测试版未做端到端加密。';
+        '场地 WiFi 不稳定时，让学员用手机流量扫码进入。内容端到端加密，中继看不到消息正文。';
       note.classList.toggle('ok', running);
       note.classList.toggle('err', t.status === 'error');
     }

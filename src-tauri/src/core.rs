@@ -1,4 +1,4 @@
-//! 会话与状态中枢：把「服务端 <-> 窗口」粘起来的那一层。
+﻿//! 会话与状态中枢：把「服务端 <-> 窗口」粘起来的那一层。
 //!
 //! 对应旧版 `main.js` 里除窗口管理以外的部分：
 //! 历史（仅内存）、会话生命周期、网络重算、二维码刷新、状态推送、点赞复现。
@@ -100,12 +100,15 @@ pub struct AppCore {
     profiles_cache: Mutex<Option<(Instant, Vec<network::ConnectionProfile>)>>,
     push_scheduled: AtomicBool,
     last_like_replay: Mutex<Option<Instant>>,
+    /// 远程模式的端到端密钥槽（与 Tunnel 共享）
+    remote_key: crate::crypto::RemoteKey,
 }
 
 impl AppCore {
-    pub fn new(settings: Arc<Store>) -> Arc<AppCore> {
+    pub fn new(settings: Arc<Store>, remote_key: crate::crypto::RemoteKey) -> Arc<AppCore> {
         Arc::new(AppCore {
             settings,
+            remote_key,
             history: Mutex::new(Vec::new()),
             session: Mutex::new(None),
             bridge: Mutex::new(None),
@@ -170,6 +173,7 @@ impl AppCore {
             filter: Some(filter),
             sink,
             preferred_port: 8080,
+            remote_key: Arc::clone(&self.remote_key),
         })
         .await
         .map_err(|e| format!("服务启动失败：{e}"))?;
