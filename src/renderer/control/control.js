@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -174,6 +174,18 @@
     setText('url', next.url || '正在启动…');
     setText('versionChip', `v ${next.version || '0.1.0'}`);
 
+    // 房间换了（结束/重开）→ 旧的远程地址失效，主动关掉隧道
+    if (next.token && next.token !== tunnelToken) {
+      const changed = Boolean(tunnelToken);
+      tunnelToken = next.token;
+      if (changed && lastTunnel.status !== 'idle') {
+        api
+          .tunnelStop()
+          .then(paintTunnel)
+          .catch(() => {});
+      }
+    }
+
     const qr = $('qr');
     if (next.qr && qr.dataset.src !== next.qr) {
       qr.dataset.src = next.qr;
@@ -283,6 +295,63 @@
 
   $('autoReplay').addEventListener('change', (event) => {
     guard(api.setConfig({ autoReplay: event.target.checked }));
+  });
+
+  /* ------------------------------------------------------------ 远程模式 */
+  // 测试版：Cloudflare Quick Tunnel，按需下载 cloudflared。数据经过 Cloudflare，未加密。
+  let lastTunnel = { status: 'idle' };
+  let tunnelToken = '';
+
+  function paintTunnel(t) {
+    if (!t) return;
+    lastTunnel = t;
+    const btn = $('remoteBtn');
+    const note = $('remoteNote');
+    const running = t.status === 'running';
+    const busy = t.status === 'starting' || t.status === 'downloading';
+
+    if (btn) {
+      btn.textContent = running || busy ? '关闭' : t.status === 'error' ? '重试' : '开启';
+      btn.disabled = Boolean(busy);
+    }
+    if (note) {
+      note.textContent =
+        t.message ||
+        '场地 WiFi 不稳定时，让学员用手机流量扫码进入。数据会经过 Cloudflare，测试版未做端到端加密。';
+      note.classList.toggle('ok', running);
+      note.classList.toggle('err', t.status === 'error');
+    }
+
+    const wrap = $('remoteQrWrap');
+    const img = $('remoteQr');
+    if (wrap && img) {
+      if (running && t.qr) {
+        img.src = t.qr;
+        wrap.hidden = false;
+      } else {
+        wrap.hidden = true;
+      }
+    }
+
+    const u = $('remoteUrl');
+    if (u) {
+      u.hidden = !(running && t.url);
+      u.textContent = running ? t.url : '';
+    }
+  }
+
+  if (api.onTunnelState) api.onTunnelState(paintTunnel);
+  if (api.tunnelState) {
+    api
+      .tunnelState()
+      .then(paintTunnel)
+      .catch(() => {});
+  }
+
+  $('remoteBtn').addEventListener('click', () => {
+    const active = ['running', 'starting', 'downloading'].indexOf(lastTunnel.status) >= 0;
+    const p = active ? api.tunnelStop() : api.tunnelStart();
+    p.then(paintTunnel).catch(() => toast('远程模式切换失败'));
   });
 
   $('modeScroll').addEventListener('click', () => guard(api.setMode('scroll')));

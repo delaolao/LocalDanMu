@@ -725,6 +725,66 @@ input[type="range"] {
   flex: 1;
 }
 
+/* ------------------------------------------------------------ 远程模式 */
+
+.remote-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.remote-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+}
+
+.remote-title em {
+  font-style: normal;
+  font-size: 10px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  border-radius: 999px;
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.remote-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted-2);
+}
+
+.remote-note.ok { color: var(--accent); }
+.remote-note.err { color: var(--danger); }
+
+.remote-qr {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 2px;
+}
+
+.remote-qr img {
+  width: 168px;
+  height: 168px;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px;
+}
+
+.remote-url {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  text-align: center;
+  word-break: break-all;
+}
+
 /* ------------------------------------------------------------ 现场信号 */
 
 .signal-card {

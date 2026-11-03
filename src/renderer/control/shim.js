@@ -1,4 +1,4 @@
-/* eslint-disable */
+﻿/* eslint-disable */
 /**
  * Tauri 兼容层（兼容层，不是框架）。
  *
@@ -98,6 +98,19 @@
     },
     importWords: function () {
       return invoke('app_import_words');
+    },
+
+    tunnelStart: function () {
+      return invoke('tunnel_start');
+    },
+    tunnelStop: function () {
+      return invoke('tunnel_stop');
+    },
+    tunnelState: function () {
+      return invoke('tunnel_state');
+    },
+    onTunnelState: function (cb) {
+      listen('tunnel:state', cb);
     },
 
     hidePanel: function () {

@@ -1,4 +1,4 @@
-//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
+﻿//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
 //!
 //! 对应旧版 `src/main/main.js`。这里只做**编排**，业务都在各模块里：
 //! - `settings`  设置项持久化（白名单 + 防抖落盘 + 便携模式）
@@ -22,6 +22,7 @@ mod qr;
 mod server;
 mod settings;
 mod sys;
+mod tunnel;
 mod windows;
 
 use std::sync::atomic::Ordering;
@@ -35,6 +36,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent};
 
 use core::{install_app_handle, AppCore};
 use settings::Store;
+use tunnel::Tunnel;
 use windows::{CONTROL, OVERLAY};
 
 fn core_of(app: &AppHandle) -> Arc<AppCore> {
@@ -93,6 +95,9 @@ fn main() {
             dm_hover,
             dm_modal,
             dm_ready,
+            tunnel_start,
+            tunnel_stop,
+            tunnel_state,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -102,6 +107,7 @@ fn main() {
             let store = Store::open(data_dir.join("settings.json"));
             let core = AppCore::new(store);
             app.manage(Arc::clone(&core));
+            app.manage(Tunnel::new());
 
             // 窗口先出来，讲师有东西可看
             windows::create_control(&handle)?;
@@ -161,6 +167,8 @@ fn main() {
                 if let Some(st) = core.server_state() {
                     st.broadcast_json(&json!({ "type": "session_end", "reason": "quit" }));
                 }
+                // 隧道子进程必须显式收尸，否则 cloudflared 会留在后台
+                app.state::<std::sync::Arc<Tunnel>>().inner().shutdown();
                 std::thread::sleep(Duration::from_millis(80));
             }
         });
@@ -938,4 +946,30 @@ fn dm_ready(app: AppHandle) -> bool {
         }
     }
     true
+}
+
+/* --------------------------------------------------------------- 远程模式 */
+
+/// 开启远程模式（Cloudflare Quick Tunnel）。这是测试版功能，界面上会提示未加密。
+#[tauri::command]
+fn tunnel_start(app: AppHandle) -> Value {
+    let core = core_of(&app);
+    let t = app.state::<std::sync::Arc<Tunnel>>().inner().clone();
+    let Some(session) = core.session() else {
+        return json!({ "status": "error", "message": "会话还没启动", "url": "", "qr": "" });
+    };
+    t.start(app.clone(), session.port, session.token.clone());
+    t.snapshot()
+}
+
+#[tauri::command]
+fn tunnel_stop(app: AppHandle) -> Value {
+    let t = app.state::<std::sync::Arc<Tunnel>>().inner().clone();
+    t.stop(&app);
+    t.snapshot()
+}
+
+#[tauri::command]
+fn tunnel_state(app: AppHandle) -> Value {
+    app.state::<std::sync::Arc<Tunnel>>().inner().snapshot()
 }
