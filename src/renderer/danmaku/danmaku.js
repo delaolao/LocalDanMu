@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /**
  * 弹幕渲染层

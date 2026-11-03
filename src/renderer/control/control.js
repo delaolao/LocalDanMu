@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 (function () {
   const $ = (id) => document.getElementById(id);

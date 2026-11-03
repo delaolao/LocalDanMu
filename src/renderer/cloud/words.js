@@ -1,4 +1,4 @@
-﻿(function (root, factory) {
+(function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.CloudWords = factory();
 })(typeof self !== 'undefined' ? self : this, function () {

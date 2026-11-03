@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /**
  * 观众端（手机 H5）

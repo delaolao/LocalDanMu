@@ -1,4 +1,4 @@
-﻿/* eslint-disable */
+/* eslint-disable */
 /**
  * Tauri 兼容层（兼容层，不是框架）。
  *

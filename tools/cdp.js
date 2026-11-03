@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 /**
  * 通过 WebView2 的 CDP 在 Tauri 页面里执行一段 JS。
  * 用法：node tools/cdp.js "<js>" [url 片段]
