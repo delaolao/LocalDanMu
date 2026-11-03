@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #06100e;
   --text: #edfdf7;
   --muted: #87a9a0;
@@ -202,4 +202,70 @@ h1 {
   color: var(--muted);
   opacity: 0.65;
   padding-top: 0.4em;
+}
+
+/* --------------------------------------------- 双二维码（局域网 + 流量入口） */
+
+.qr-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: clamp(18px, 3vw, 56px);
+}
+
+.qr-item {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2vh;
+}
+
+/* 两个码同时出现时收一档，保证 1080p 投影也放得下 */
+.qr-row.multi .qr-box img {
+  width: min(33vh, 21vw);
+  height: min(33vh, 21vw);
+}
+
+.qr-row.multi .scan-hint {
+  font-size: clamp(12px, 1.35vh, 18px);
+}
+
+/* 访问码：扫码失败时可以手输房间号找回 */
+.code-line {
+  font-size: clamp(15px, 1.9vh, 26px);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.code-line b {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 1.16em;
+  color: var(--text);
+  letter-spacing: 0.12em;
+  margin-left: 0.3em;
+}
+
+/* 远程入口地址（隧道开的时候才出现） */
+.remote-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  font-size: clamp(12px, 1.5vh, 20px);
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.remote-tag {
+  flex: 0 0 auto;
+  padding: 0.12em 0.6em;
+  border-radius: 999px;
+  font-size: 0.8em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.remote-addr {
+  font-family: Consolas, "Courier New", monospace;
+  color: var(--accent);
 }

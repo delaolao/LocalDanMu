@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN" data-theme="system">
   <head>
     <meta charset="utf-8" />
@@ -11,8 +11,16 @@
 
     <main class="wrap">
       <section class="left">
-        <div class="qr-box"><img id="qr" alt="扫码进入" /></div>
-        <div class="scan-hint">微信扫一扫 · 无需注册</div>
+        <div class="qr-row" id="qrRow">
+          <figure class="qr-item">
+            <div class="qr-box"><img id="qr" alt="扫码进入" /></div>
+            <figcaption class="scan-hint">微信扫一扫 · 无需注册</figcaption>
+          </figure>
+          <figure class="qr-item" id="remoteItem" hidden>
+            <div class="qr-box"><img id="remoteQr" alt="流量入口" /></div>
+            <figcaption class="scan-hint">现场网络不给力？用流量扫这个</figcaption>
+          </figure>
+        </div>
       </section>
 
       <section class="right">
@@ -20,6 +28,11 @@
         <p class="lead">扫码打开页面，发送文字或图片，内容会实时显示在大屏上。</p>
 
         <div class="url" id="url">—</div>
+        <div class="code-line">访问码 <b id="roomCode">—</b></div>
+        <div class="remote-line" id="remoteLine" hidden>
+          <span class="remote-tag">远程入口</span>
+          <span class="remote-addr" id="remoteAddr"></span>
+        </div>
 
         <div class="wifi" id="wifi" hidden>
           <div class="wifi-title">现场 WiFi</div>

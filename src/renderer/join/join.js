@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 投屏引导页：开场时把二维码 + 现场 WiFi 账密放大投到屏幕上，
@@ -23,6 +23,7 @@
     }
 
     $('url').textContent = state.url || '—';
+    $('roomCode').textContent = state.token || '—';
     $('online').textContent = String(state.online || 0);
     $('brandLine').textContent = `培训弹幕 v${state.version || '0.1.0'} · teacherGeng programs with DSH.`;
 
@@ -33,6 +34,33 @@
     $('ssid').textContent = ssid || '—';
     $('pwd').textContent = pwd || '无密码';
     $('pwdRow').hidden = !pwd;
+  }
+
+  /** 远程模式：隧道就绪时多显示一个「流量入口」二维码 */
+  function renderTunnel(t) {
+    const on = Boolean(t && t.status === 'running' && t.qr);
+    const item = $('remoteItem');
+    const row = $('qrRow');
+    const line = $('remoteLine');
+    if (item) item.hidden = !on;
+    if (row) row.classList.toggle('multi', on);
+    if (on) {
+      const img = $('remoteQr');
+      if (img && img.src !== t.qr) img.src = t.qr;
+    }
+    if (line) {
+      line.hidden = !on;
+      const addr = $('remoteAddr');
+      if (addr) addr.textContent = on ? t.url : '';
+    }
+  }
+
+  if (window.join.onTunnelState) window.join.onTunnelState(renderTunnel);
+  if (window.join.tunnelState) {
+    window.join
+      .tunnelState()
+      .then(renderTunnel)
+      .catch(() => {});
   }
 
   $('closeBtn').addEventListener('click', () => window.join.close());

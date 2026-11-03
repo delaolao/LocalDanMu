@@ -1,4 +1,4 @@
-/* eslint-disable */
+﻿/* eslint-disable */
 /**
  * Tauri 兼容层（兼容层，不是框架）。
  *
@@ -172,6 +172,12 @@
     },
     close: function () {
       return invoke('join_close');
+    },
+    tunnelState: function () {
+      return invoke('tunnel_state');
+    },
+    onTunnelState: function (cb) {
+      listen('tunnel:state', cb);
     }
   };
 })();

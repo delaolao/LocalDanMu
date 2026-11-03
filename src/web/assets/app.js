@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /**
  * 观众端（手机 H5）
@@ -20,6 +20,9 @@
   };
 
   var PROTO = 1; // 与 server.js 的 hello.proto 对应
+
+  // 通过 Cloudflare Tunnel 进来时是 https：延迟更高、且建议少发图
+  var IS_REMOTE = location.protocol === 'https:';
 
   /* ---------------------------------------------------------------- 主题 */
 
@@ -434,6 +437,7 @@
 
   function updateHint() {
     var parts = ['每人每 ' + state.intervalSec + ' 秒可发 1 条'];
+    if (IS_REMOTE) parts.push('远程模式，图片建议回 WiFi 再发');
     if (state.paused) parts.push('讲师已暂停展示');
     els.hint.textContent = parts.join(' · ');
   }
@@ -470,7 +474,7 @@
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var url = proto + '//' + location.host + '/ws?t=' + encodeURIComponent(TOKEN);
 
-    setStatus('', '连接中…');
+    setStatus('', IS_REMOTE ? '正在连接远程会场…' : '连接中…');
     try {
       ws = new WebSocket(url);
     } catch (e) {
@@ -481,7 +485,7 @@
     ws.onopen = function () {
       state.connected = true;
       state.retry = 0;
-      setStatus('on', '培训互动 · 已连接');
+      setStatus('on', IS_REMOTE ? '培训互动 · 远程模式' : '培训互动 · 已连接');
       updateSendButton();
     };
 
