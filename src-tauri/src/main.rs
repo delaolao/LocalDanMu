@@ -962,7 +962,16 @@ fn tunnel_start(app: AppHandle) -> Value {
     let Some(session) = core.session() else {
         return json!({ "status": "error", "message": "会话还没启动", "url": "", "qr": "" });
     };
-    t.start(app.clone(), session.port, session.token.clone());
+    let cfg = core.settings.get();
+    t.start(
+        app.clone(),
+        tunnel::StartArgs {
+            port: session.port,
+            room: session.token.clone(),
+            tunnel_token: cfg.tunnel_token.clone(),
+            host: cfg.tunnel_host.clone(),
+        },
+    );
     t.snapshot()
 }
 

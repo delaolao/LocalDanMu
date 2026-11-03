@@ -171,7 +171,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-win.ps1
 - 隧道地址每次开启都会变，对应"每场一个二维码"的用法没问题
 - 开启期间有人拿到二维码就能进，和局域网是同一个信任模型（房间号就是门票）
 - 关掉程序或点「关闭」，隧道进程会被一并回收（Job Object 保证，强杀也不留残留）
-- **自动续连**：勾上后隧道掉了会在 3 秒后自动重开；但重开地址会变，学员需重新扫码
+- **自动续连**：勾上后隧道掉了会在 3 秒后自动重开；临时隧道重开会变地址，固定隧道不变
+- **固定域名**（可选，推荐）：设置里填 Cloudflare 隧道令牌 + 域名（如 `dm.teachergeng.space`），
+  地址就固定下来，重连也不用学员重新扫码；配法见 [docs/remote-tunnel.md](docs/remote-tunnel.md#固定域名named-tunnel推荐)
 
 ---
 

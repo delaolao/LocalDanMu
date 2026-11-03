@@ -39,6 +39,19 @@ struct Inner {
     job: Option<JobGuard>,
 }
 
+/// 启动一次隧道所需的全部参数（自动续连时原样复用）
+#[derive(Clone, Default)]
+pub struct StartArgs {
+    /// 本机会话服务端口
+    pub port: u16,
+    /// 房间口令
+    pub room: String,
+    /// 固定隧道令牌（空 = 用临时隧道）
+    pub tunnel_token: String,
+    /// 固定域名（例如 dm.example.com）
+    pub host: String,
+}
+
 pub struct Tunnel {
     inner: Mutex<Inner>,
     busy: AtomicBool,
@@ -51,7 +64,7 @@ pub struct Tunnel {
     /// 讲师主动关闭时为 true，重连逻辑据此判断"不是意外掉线"
     stopped: AtomicBool,
     /// 最近一次成功启动的参数，重连时复用
-    last: Mutex<Option<(u16, String)>>,
+    last: Mutex<Option<StartArgs>>,
 }
 
 impl Tunnel {
@@ -95,9 +108,9 @@ impl Tunnel {
                 return;
             }
             let target = me.last.lock().ok().and_then(|g| g.clone());
-            if let Some((port, token)) = target {
+            if let Some(args) = target {
                 me.set(&app, "starting", None, "隧道断开，正在自动重连…");
-                me.start(app.clone(), port, token);
+                me.start(app.clone(), args);
             }
         });
     }
@@ -110,6 +123,12 @@ impl Tunnel {
             "qr": g.qr,
             "message": g.message,
             "auto": self.auto.load(Ordering::SeqCst),
+            "fixed": self
+                .last
+                .lock()
+                .ok()
+                .and_then(|l| l.as_ref().map(|a| !a.tunnel_token.is_empty()))
+                .unwrap_or(false),
         })
     }
 
@@ -131,20 +150,26 @@ impl Tunnel {
     }
 
     /// 启动隧道。`port` 是本机会话服务端口，`token` 是房间口令。
-    pub fn start(self: &Arc<Self>, app: AppHandle, port: u16, token: String) {
+    pub fn start(self: &Arc<Self>, app: AppHandle, args: StartArgs) {
         if self.busy.swap(true, Ordering::SeqCst) {
             return; // 已经在启动/运行
         }
         self.stopped.store(false, Ordering::SeqCst);
         if let Ok(mut g) = self.last.lock() {
-            *g = Some((port, token.clone()));
+            *g = Some(args.clone());
         }
         let me = Arc::clone(self);
         let app2 = app.clone();
-        self.set(&app, "starting", None, "正在准备隧道…");
+        let fixed = !args.tunnel_token.is_empty();
+        self.set(
+            &app,
+            "starting",
+            None,
+            if fixed { "正在连接固定隧道…" } else { "正在准备隧道…" },
+        );
 
         std::thread::spawn(move || {
-            let result = me.run(&app2, port, &token);
+            let result = me.run(&app2, args);
             me.busy.store(false, Ordering::SeqCst);
             if let Err(err) = result {
                 // 失败时把密钥清掉，避免留下一个没人知道的密钥
@@ -155,25 +180,50 @@ impl Tunnel {
         });
     }
 
-    fn run(self: &Arc<Self>, app: &AppHandle, port: u16, token: &str) -> Result<(), String> {
+    fn run(self: &Arc<Self>, app: &AppHandle, args: StartArgs) -> Result<(), String> {
         let bin = ensure_binary(app, self)?;
-        self.set(app, "starting", None, "正在建立隧道…");
+        let fixed = !args.tunnel_token.is_empty();
+
+        if fixed && args.host.trim().is_empty() {
+            return Err("固定隧道需要在设置里填写公开域名（例如 dm.example.com）".into());
+        }
+        self.set(
+            app,
+            "starting",
+            None,
+            if fixed { "正在连接固定隧道…" } else { "正在建立隧道…" },
+        );
 
         // 每次开启生成一把新密钥；URL 里带 #k=，它不会发给 Cloudflare
         let key = crate::crypto::random_key();
         crate::crypto::set_key(&self.key, Some(key));
         let frag = crate::crypto::key_to_fragment(&key);
 
+        let cmd_args: Vec<String> = if fixed {
+            // 注意：--no-autoupdate / --loglevel 是 tunnel 级参数，必须写在 run 前面
+            vec![
+                "tunnel".into(),
+                "--no-autoupdate".into(),
+                "--loglevel".into(),
+                "info".into(),
+                "run".into(),
+                "--token".into(),
+                args.tunnel_token.clone(),
+            ]
+        } else {
+            vec![
+                "tunnel".into(),
+                "--url".into(),
+                format!("http://127.0.0.1:{}", args.port),
+                "--no-autoupdate".into(),
+                "--loglevel".into(),
+                "info".into(),
+            ]
+        };
+
         #[allow(unused_mut)]
         let mut child = Command::new(&bin)
-            .args([
-                "tunnel",
-                "--url",
-                &format!("http://127.0.0.1:{port}"),
-                "--no-autoupdate",
-                "--loglevel",
-                "info",
-            ])
+            .args(&cmd_args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .creation_flags(0x0800_0000) // CREATE_NO_WINDOW：不弹黑框
@@ -187,25 +237,57 @@ impl Tunnel {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
+        // cloudflared 的用法错误可能打到 stdout，成功/失败日志在 stderr。
+        // 两边都留最后一行，失败时拼进提示里，省得用户猜。
+        let tail_buf: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let tail_out = Arc::clone(&tail_buf);
+
         // 起两个读线程，避免管道写满导致子进程卡住
         if let Some(out) = stdout {
             std::thread::spawn(move || {
-                for _line in BufReader::new(out).lines().map_while(Result::ok) {}
+                for line in BufReader::new(out).lines().map_while(Result::ok) {
+                    if !line.trim().is_empty() {
+                        if let Ok(mut g) = tail_out.lock() {
+                            g.push(line);
+                            if g.len() > 8 {
+                                g.remove(0);
+                            }
+                        }
+                    }
+                }
             });
         }
 
         let me2 = Arc::clone(self);
         let app2 = app.clone();
-        let token = token.to_string();
+        let token = args.room.clone();
+        let host = args.host.trim().trim_start_matches("https://").trim_end_matches('/').to_string();
         let frag = frag.clone();
         let url_re = regex::Regex::new(r"https://[a-z0-9-]+\.trycloudflare\.com").unwrap();
 
+        let tail_in = Arc::clone(&tail_buf);
         let reader = std::thread::spawn(move || {
+            let tail_buf = tail_in;
             let mut found = false;
             if let Some(err) = stderr {
                 for line in BufReader::new(err).lines().map_while(Result::ok) {
+                    if !line.trim().is_empty() {
+                        if let Ok(mut g) = tail_buf.lock() {
+                            g.push(line.clone());
+                            if g.len() > 8 {
+                                g.remove(0);
+                            }
+                        }
+                    }
                     if !found {
-                        if let Some(m) = url_re.find(&line) {
+                        if fixed {
+                            // 固定隧道：地址是我们自己的域名，连接器注册成功即可用
+                            if line.contains("Registered tunnel connection") {
+                                found = true;
+                                let join = format!("https://{host}/j/{token}#k={frag}");
+                                me2.set(&app2, "running", Some(join), "固定隧道已连接，地址不会变");
+                            }
+                        } else if let Some(m) = url_re.find(&line) {
                             found = true;
                             let base = m.as_str().to_string();
                             let join = format!("{base}/j/{token}#k={frag}");
@@ -217,6 +299,28 @@ impl Tunnel {
                         me2.set(&app2, "error", None, "隧道建立失败，检查网络后重试");
                     }
                 }
+            }
+            if !found {
+                // 进程没给成功信号就退出了：把最后一行日志带上，便于判断是令牌问题还是网络问题
+                // 挑一条最有信息量的：优先带错误关键字的行，否则取最后一行
+                let hint = tail_buf
+                    .lock()
+                    .ok()
+                    .and_then(|g| {
+                        let keys = ["not valid", "Unauthorized", "error", "failed", "invalid", "denied"];
+                        g.iter()
+                            .find(|l| keys.iter().any(|k| l.to_lowercase().contains(k)))
+                            .or_else(|| g.last())
+                            .cloned()
+                    })
+                    .unwrap_or_default();
+                let hint: String = hint.trim().chars().take(160).collect();
+                let msg = if hint.trim().is_empty() {
+                    "隧道进程退出（没有输出日志）".to_string()
+                } else {
+                    format!("隧道连接失败：{}", hint.trim())
+                };
+                me2.set(&app2, "error", None, &msg);
             }
             found
         });

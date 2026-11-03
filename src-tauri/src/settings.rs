@@ -1,4 +1,4 @@
-//! 设置项存储。
+﻿//! 设置项存储。
 //!
 //! 与旧版 `src/main/store.js` **逐键对齐**：同样的键名（camelCase）、同样的取值范围、
 //! 同样的默认值、同样的落盘格式。这样讲师从旧版升级上来，`settings.json` 能直接沿用，
@@ -50,6 +50,10 @@ pub struct Settings {
     pub custom_words: String,
     /// 高赞弹幕是否自动重新上屏
     pub auto_replay: bool,
+    /// 固定隧道的令牌（Cloudflare Zero Trust → Tunnels 里复制），空表示用临时隧道
+    pub tunnel_token: String,
+    /// 固定隧道的公开域名，例如 dm.teachergeng.space
+    pub tunnel_host: String,
 }
 
 pub const AREA_VALUES: [&str; 4] = ["full", "top", "middle", "bottom"];
@@ -74,6 +78,8 @@ impl Default for Settings {
             filter_level: "block".into(),
             custom_words: String::new(),
             auto_replay: true,
+            tunnel_token: String::new(),
+            tunnel_host: String::new(),
         }
     }
 }
@@ -135,6 +141,8 @@ impl Settings {
                 "mode" => self.mode = enum_of(value, &MODE_VALUES, &d.mode),
                 "filterLevel" => self.filter_level = enum_of(value, &FILTER_LEVELS, &d.filter_level),
                 "customWords" => self.custom_words = clean_string(value, 6000),
+                "tunnelToken" => self.tunnel_token = clean_string(value, 4096),
+                "tunnelHost" => self.tunnel_host = clean_string(value, 128),
                 "autoReplay" => {
                     self.auto_replay = match value {
                         Value::Bool(b) => *b,
@@ -297,6 +305,8 @@ pub fn settings_to_json(s: &Settings) -> Value {
         "filterLevel": s.filter_level,
         "customWords": s.custom_words,
         "autoReplay": s.auto_replay,
+        "tunnelToken": s.tunnel_token,
+        "tunnelHost": s.tunnel_host,
     })
 }
 

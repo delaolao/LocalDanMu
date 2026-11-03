@@ -214,6 +214,8 @@
     setControl('ssidInput', cfg.wifiSsid || '');
     setControl('pwdInput', cfg.wifiPassword || '');
     setControl('filterSel', cfg.filterLevel || 'block');
+    setControl('tunnelHostInput', cfg.tunnelHost || '');
+    setControl('tunnelTokenInput', cfg.tunnelToken || '');
     setControl('wordsInput', cfg.customWords || '');
 
     const hasWifi = Boolean(cfg.wifiSsid || cfg.wifiPassword);
@@ -336,6 +338,9 @@
     const u = $('remoteUrl');
     if (u) u.textContent = running ? t.url : '';
 
+    const title = $('remoteTitle');
+    if (title) title.textContent = running && t.fixed ? '远程模式 · 固定域名' : '远程模式';
+
     const auto = $('autoReconnect');
     if (auto && document.activeElement !== auto) auto.checked = Boolean(t.auto);
   }
@@ -393,6 +398,18 @@
       api.setConfig({ wifiSsid: $('ssidInput').value, wifiPassword: $('pwdInput').value });
     }, 450);
   }
+
+  function saveTunnel() {
+    guard(
+      api.setConfig({
+        tunnelHost: $('tunnelHostInput').value.trim(),
+        tunnelToken: $('tunnelTokenInput').value.trim()
+      })
+    );
+  }
+
+  $('tunnelHostInput').addEventListener('blur', saveTunnel);
+  $('tunnelTokenInput').addEventListener('blur', saveTunnel);
 
   $('ssidInput').addEventListener('input', saveWifi);
   $('pwdInput').addEventListener('input', saveWifi);

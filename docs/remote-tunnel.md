@@ -103,6 +103,56 @@ https://xxx.trycloudflare.com/j/<房间号>#k=<32 字节 base64url>
 
 **ack 仍是明文**：它只包含 `msgId/status/seq/retryAfter`，没有消息内容。
 
+## 固定域名（Named Tunnel，推荐）
+
+Quick Tunnel 的地址每次都会变。给培训材料印二维码、或者希望"断线重连后学员不用重新扫码"，
+就需要一条**固定隧道**——用你自己的 Cloudflare 域名。
+
+### 控制台配置（一次性）
+
+1. 打开 https://one.dash.cloudflare.com → **Networks → Tunnels → Create a tunnel**
+2. 连接器选 **Cloudflared**，名字随意（如 `localdanmu`），保存
+3. **Public Hostname → Add a public hostname**：
+
+   | 字段 | 值 |
+   | --- | --- |
+   | Subdomain | `dm` |
+   | Domain | 你的域名（例：`teachergeng.space`） |
+   | Type | `HTTP` |
+   | URL | `localhost:8080` |
+
+4. 回到隧道详情页，复制**令牌**（点命令框右侧的复制按钮——屏幕上显示的是打码的 `***`，手抄无效）
+
+> ⚠️ 不要执行页面提示的 `cloudflared.exe service install <令牌>`。那是把 cloudflared 装成
+> Windows 服务（开机自启、脱离程序管理）。本项目自己会拉起 cloudflared，不需要装服务。
+
+### 程序里怎么用
+
+控制面板 → **设置与网络 → 固定隧道**：
+
+- **公开域名**：填 `dm.teachergeng.space`
+- **隧道令牌**：粘贴上面复制的令牌
+
+填好后点「远程模式 → 开启」，地址就固定成 `https://dm.teachergeng.space/j/<房间号>`。
+令牌只存在本机 `settings.json` 里，不上传任何地方。
+
+### 固定域名带来的好处
+
+| | 临时隧道 | 固定隧道 |
+| --- | --- | --- |
+| 地址 | 每次随机 | 永远不变 |
+| 自动续连后 | 地址变，学员要重新扫码 | 地址不变，学员刷新即可 |
+| 能印在培训材料上 | 不能 | 可以 |
+| 令牌 | 不需要 | 需要（本机保存） |
+
+### 常见错误
+
+| 提示 | 原因 |
+| --- | --- |
+| `Provided Tunnel token is not valid.` | 令牌不对/被截断/已删除 |
+| 页面 1033 | 隧道连上了，但没配 Public Hostname |
+| 页面 502 | Public Hostname 指的端口和程序实际端口不一致 |
+
 ## 自动续连
 
 隧道进程崩溃、或者 Cloudflare 侧把连接掐了，默认行为是显示错误、等讲师手动点「重试」。
