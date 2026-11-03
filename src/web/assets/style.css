@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #06100e;
   --card: #0d1f1a;
   --line: #23453c;
@@ -598,4 +598,45 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: 14px;
+}
+
+/* 微信内置浏览器：未备案域名会弹拦截页，这里提前说明一句 */
+.wx-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #8a5a00;
+  background: #fdf0cf;
+  border-bottom: 1px solid #e8cf95;
+}
+
+html[data-theme='dark'] .wx-tip {
+  color: #f5d9a8;
+  background: rgba(180, 120, 20, 0.18);
+  border-bottom-color: rgba(245, 217, 168, 0.25);
+}
+
+.wx-tip span {
+  flex: 1 1 auto;
+}
+
+.wx-tip b {
+  color: #a86b00;
+}
+
+html[data-theme='dark'] .wx-tip b {
+  color: #ffd479;
+}
+
+.wx-tip button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  padding: 0 2px;
+  cursor: pointer;
 }

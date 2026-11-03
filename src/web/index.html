@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -14,6 +14,11 @@
   </head>
   <body>
     <div class="app" id="app">
+      <div class="wx-tip" id="wxTip" hidden>
+        <span>微信若提示「未备案」，点<b>继续访问</b>即可；也可用右上角 ··· → 在浏览器打开</span>
+        <button type="button" id="wxTipClose" aria-label="关闭">✕</button>
+      </div>
+
       <header class="bar">
         <div class="status-wrap">
           <span class="dot" id="dot"></span>

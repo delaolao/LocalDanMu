@@ -43,6 +43,8 @@
     const line = $('remoteLine');
     if (item) item.hidden = !on;
     if (row) row.classList.toggle('multi', on);
+    const tip = $('remoteTip');
+    if (tip) tip.hidden = !on;
     if (on) {
       const img = $('remoteQr');
       if (img && img.src !== t.qr) img.src = t.qr;

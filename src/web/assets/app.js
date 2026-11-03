@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 观众端（手机 H5）
@@ -96,6 +96,9 @@
 
   // 通过 Cloudflare Tunnel 进来时是 https：延迟更高、且建议少发图
   var IS_REMOTE = location.protocol === 'https:';
+
+  // 微信内置浏览器对未备案域名会弹「将要访问」拦截页；提前给一句说明，减少现场困惑。
+  var IS_WECHAT = /MicroMessenger/i.test(navigator.userAgent);
 
   /* ---------------------------------------------------------------- 主题 */
 
@@ -1025,6 +1028,25 @@
     setTimeout(layoutColors, 80);
   });
   window.addEventListener('load', layoutColors);
+
+  // 只有「远程模式 + 微信」才提示：局域网 IP 不会触发备案拦截
+  if (IS_WECHAT && IS_REMOTE) {
+    var tip = document.getElementById('wxTip');
+    var tipClose = document.getElementById('wxTipClose');
+    try {
+      if (tip && sessionStorage.getItem('wxTipClosed') !== '1') tip.hidden = false;
+    } catch (e) {
+      if (tip) tip.hidden = false;
+    }
+    if (tipClose) {
+      tipClose.addEventListener('click', function () {
+        if (tip) tip.hidden = true;
+        try {
+          sessionStorage.setItem('wxTipClosed', '1');
+        } catch (e) {}
+      });
+    }
+  }
 
   initKey().then(function () {
     connect();
