@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #06100e;
   --text: #edfdf7;
   --muted: #87a9a0;
@@ -231,20 +231,6 @@ h1 {
   font-size: clamp(12px, 1.35vh, 18px);
 }
 
-/* 访问码：扫码失败时可以手输房间号找回 */
-.code-line {
-  font-size: clamp(15px, 1.9vh, 26px);
-  color: var(--muted);
-  letter-spacing: 0.04em;
-}
-
-.code-line b {
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 1.16em;
-  color: var(--text);
-  letter-spacing: 0.12em;
-  margin-left: 0.3em;
-}
 
 /* 远程入口地址（隧道开的时候才出现） */
 .remote-line {

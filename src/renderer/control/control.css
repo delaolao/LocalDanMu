@@ -1,4 +1,4 @@
-/* 视觉基调对齐 MyPassword：深墨绿底 + 薄荷绿强调、柔和描边、圆角卡片 */
+﻿/* 视觉基调对齐 MyPassword：深墨绿底 + 薄荷绿强调、柔和描边、圆角卡片 */
 
 :root {
   color-scheme: dark;
@@ -274,10 +274,10 @@ main {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 14px 8px;
+  padding: 10px 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 main::-webkit-scrollbar {
@@ -299,14 +299,23 @@ main::-webkit-scrollbar-thumb {
 
 .qr-card {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
+}
+
+.qr-side {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
 
 .qr-wrap {
-  width: 178px;
-  height: 178px;
+  flex: 0 0 auto;
+  width: 132px;
+  height: 132px;
   background: #fff;
   border-radius: 14px;
   padding: 6px;
@@ -408,7 +417,7 @@ main::-webkit-scrollbar-thumb {
   background: var(--panel);
   border: 1px solid var(--border-soft);
   border-radius: 14px;
-  padding: 10px 8px;
+  padding: 7px 6px;
   text-align: center;
 }
 
@@ -516,7 +525,7 @@ main::-webkit-scrollbar-thumb {
 }
 
 .log-list {
-  max-height: 148px;
+  max-height: 120px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -737,10 +746,17 @@ input[type="range"] {
 .remote-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   font-size: 12.5px;
   color: var(--text-soft);
+}
+
+.remote-head .remote-title {
+  margin-right: auto;
+}
+
+.remote-head .switch {
+  font-size: 11px;
 }
 
 .remote-title em {
@@ -763,25 +779,29 @@ input[type="range"] {
 .remote-note.ok { color: var(--accent); }
 .remote-note.err { color: var(--danger); }
 
-.remote-qr {
+.remote-body {
   display: flex;
-  justify-content: center;
-  padding: 4px 0 2px;
+  align-items: center;
+  gap: 10px;
+  padding-top: 2px;
 }
 
-.remote-qr img {
-  width: 168px;
-  height: 168px;
+.remote-body img {
+  flex: 0 0 auto;
+  width: 104px;
+  height: 104px;
   border-radius: 8px;
   background: #fff;
-  padding: 6px;
+  padding: 5px;
 }
 
 .remote-url {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.5px;
+  line-height: 1.5;
   color: var(--accent);
-  text-align: center;
   word-break: break-all;
 }
 

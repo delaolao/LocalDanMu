@@ -1,4 +1,4 @@
-/* eslint-disable */
+﻿/* eslint-disable */
 /**
  * Tauri 兼容层（兼容层，不是框架）。
  *
@@ -108,6 +108,9 @@
     },
     tunnelState: function () {
       return invoke('tunnel_state');
+    },
+    tunnelSetAuto: function (on) {
+      return invoke('tunnel_set_auto', { on: !!on });
     },
     onTunnelState: function (cb) {
       listen('tunnel:state', cb);

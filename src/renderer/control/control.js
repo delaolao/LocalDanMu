@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -334,10 +334,10 @@
     }
 
     const u = $('remoteUrl');
-    if (u) {
-      u.hidden = !(running && t.url);
-      u.textContent = running ? t.url : '';
-    }
+    if (u) u.textContent = running ? t.url : '';
+
+    const auto = $('autoReconnect');
+    if (auto && document.activeElement !== auto) auto.checked = Boolean(t.auto);
   }
 
   if (api.onTunnelState) api.onTunnelState(paintTunnel);
@@ -347,6 +347,13 @@
       .then(paintTunnel)
       .catch(() => {});
   }
+
+  $('autoReconnect').addEventListener('change', (event) => {
+    api
+      .tunnelSetAuto(event.target.checked)
+      .then(paintTunnel)
+      .catch(() => toast('自动续连切换失败'));
+  });
 
   $('remoteBtn').addEventListener('click', () => {
     const active = ['running', 'starting', 'downloading'].indexOf(lastTunnel.status) >= 0;

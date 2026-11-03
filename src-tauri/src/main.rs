@@ -1,4 +1,4 @@
-//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
+﻿//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
 //!
 //! 对应旧版 `src/main/main.js`。这里只做**编排**，业务都在各模块里：
 //! - `settings`  设置项持久化（白名单 + 防抖落盘 + 便携模式）
@@ -99,6 +99,7 @@ fn main() {
             tunnel_start,
             tunnel_stop,
             tunnel_state,
+            tunnel_set_auto,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -969,6 +970,14 @@ fn tunnel_start(app: AppHandle) -> Value {
 fn tunnel_stop(app: AppHandle) -> Value {
     let t = app.state::<std::sync::Arc<Tunnel>>().inner().clone();
     t.stop(&app);
+    t.snapshot()
+}
+
+/// 自动续连开关：隧道意外断开时自动重开
+#[tauri::command]
+fn tunnel_set_auto(app: AppHandle, on: bool) -> Value {
+    let t = app.state::<std::sync::Arc<Tunnel>>().inner().clone();
+    t.set_auto(on);
     t.snapshot()
 }
 

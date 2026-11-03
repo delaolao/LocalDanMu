@@ -1,4 +1,4 @@
-//! 远程模式（测试版）：用 Cloudflare Quick Tunnel 把本机的会话服务暴露到公网，
+﻿//! 远程模式（测试版）：用 Cloudflare Quick Tunnel 把本机的会话服务暴露到公网，
 //! 让学员在场地 WiFi 不可用时，用手机流量也能进入。
 //!
 //! 设计取舍（这是"测试版"，刻意保持最小）：
@@ -44,6 +44,14 @@ pub struct Tunnel {
     busy: AtomicBool,
     /// 端到端密钥槽：开启时写入，关闭时清空（与 server 共享）
     key: crate::crypto::RemoteKey,
+    /// 自动续连：隧道掉了自动重开
+    auto: AtomicBool,
+    /// 是否正在等待重连（防止重复排队）
+    retrying: AtomicBool,
+    /// 讲师主动关闭时为 true，重连逻辑据此判断"不是意外掉线"
+    stopped: AtomicBool,
+    /// 最近一次成功启动的参数，重连时复用
+    last: Mutex<Option<(u16, String)>>,
 }
 
 impl Tunnel {
@@ -55,7 +63,43 @@ impl Tunnel {
             }),
             busy: AtomicBool::new(false),
             key,
+            auto: AtomicBool::new(false),
+            retrying: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
+            last: Mutex::new(None),
         })
+    }
+
+    pub fn auto(&self) -> bool {
+        self.auto.load(Ordering::SeqCst)
+    }
+
+    pub fn set_auto(&self, on: bool) {
+        self.auto.store(on, Ordering::SeqCst);
+    }
+
+    /// 意外掉线后排队重连：延迟后复用上一次的端口与口令重新开隧道。
+    fn schedule_restart(self: &Arc<Self>, app: &AppHandle) {
+        if !self.auto.load(Ordering::SeqCst) || self.stopped.load(Ordering::SeqCst) {
+            return;
+        }
+        if self.retrying.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let me = Arc::clone(self);
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(3));
+            me.retrying.store(false, Ordering::SeqCst);
+            if !me.auto.load(Ordering::SeqCst) || me.stopped.load(Ordering::SeqCst) {
+                return;
+            }
+            let target = me.last.lock().ok().and_then(|g| g.clone());
+            if let Some((port, token)) = target {
+                me.set(&app, "starting", None, "隧道断开，正在自动重连…");
+                me.start(app.clone(), port, token);
+            }
+        });
     }
 
     pub fn snapshot(&self) -> Value {
@@ -65,6 +109,7 @@ impl Tunnel {
             "url": g.url,
             "qr": g.qr,
             "message": g.message,
+            "auto": self.auto.load(Ordering::SeqCst),
         })
     }
 
@@ -90,6 +135,10 @@ impl Tunnel {
         if self.busy.swap(true, Ordering::SeqCst) {
             return; // 已经在启动/运行
         }
+        self.stopped.store(false, Ordering::SeqCst);
+        if let Ok(mut g) = self.last.lock() {
+            *g = Some((port, token.clone()));
+        }
         let me = Arc::clone(self);
         let app2 = app.clone();
         self.set(&app, "starting", None, "正在准备隧道…");
@@ -101,6 +150,7 @@ impl Tunnel {
                 // 失败时把密钥清掉，避免留下一个没人知道的密钥
                 crate::crypto::set_key(&me.key, None);
                 me.set(&app2, "error", None, &err);
+                me.schedule_restart(&app2);
             }
         });
     }
@@ -196,6 +246,7 @@ impl Tunnel {
                 }
             }
             me3.set(&app3, "error", None, "隧道启动超时（40 秒），可能是网络无法访问 Cloudflare");
+            me3.schedule_restart(&app3);
         });
 
         // 读线程结束 = 子进程退出
@@ -208,7 +259,8 @@ impl Tunnel {
             let status = g.status.clone();
             drop(g);
             if status == "running" || status == "starting" {
-                me4.set(&app4, "error", None, "隧道进程已退出");
+                me4.set(&app4, "error", None, "隧道进程意外退出");
+                me4.schedule_restart(&app4);
             }
         });
 
@@ -216,6 +268,7 @@ impl Tunnel {
     }
 
     pub fn stop(&self, app: &AppHandle) {
+        self.stopped.store(true, Ordering::SeqCst);
         let mut g = self.inner.lock().unwrap();
         if let Some(mut child) = g.child.take() {
             let _ = child.kill();
@@ -241,6 +294,7 @@ impl Tunnel {
 
     /// 应用退出时确保子进程被清掉，不留孤儿
     pub fn shutdown(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
         let mut g = self.inner.lock().unwrap();
         if let Some(mut child) = g.child.take() {
             let _ = child.kill();

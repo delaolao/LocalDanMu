@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 投屏引导页：开场时把二维码 + 现场 WiFi 账密放大投到屏幕上，
@@ -23,7 +23,6 @@
     }
 
     $('url').textContent = state.url || '—';
-    $('roomCode').textContent = state.token || '—';
     $('online').textContent = String(state.online || 0);
     $('brandLine').textContent = `培训弹幕 v${state.version || '0.1.0'} · teacherGeng programs with DSH.`;
 
