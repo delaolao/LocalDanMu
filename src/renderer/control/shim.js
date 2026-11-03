@@ -1,4 +1,4 @@
-﻿/* eslint-disable */
+/* eslint-disable */
 /**
  * Tauri 兼容层（兼容层，不是框架）。
  *
@@ -114,6 +114,10 @@
     },
     onTunnelState: function (cb) {
       listen('tunnel:state', cb);
+    },
+    /** 自动下载失败时的逃生口：让用户自己选一个 cloudflared.exe */
+    pickCloudflared: function () {
+      return invoke('app_pick_cloudflared');
     },
 
     hidePanel: function () {

@@ -1,4 +1,4 @@
-﻿//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
+//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
 //!
 //! 对应旧版 `src/main/main.js`。这里只做**编排**，业务都在各模块里：
 //! - `settings`  设置项持久化（白名单 + 防抖落盘 + 便携模式）
@@ -100,6 +100,7 @@ fn main() {
             tunnel_stop,
             tunnel_state,
             tunnel_set_auto,
+            app_pick_cloudflared,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -134,6 +135,7 @@ fn main() {
 
             // 服务随后启动（网卡探测不挡首屏）
             let core_bg = Arc::clone(&core);
+            let handle_bg = handle.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(err) = core_bg.start_session().await {
                     eprintln!("[main] 会话启动失败: {err}");
@@ -145,6 +147,26 @@ fn main() {
                 }
                 core_bg.push_state();
 
+                // 诊断/自动化用：LDM_TUNNEL=1 时开机自动开一次隧道，
+                // 这样不依赖 GUI 点击就能验证"下载 cloudflared → 建隧道"整条链路。
+                if std::env::var("LDM_TUNNEL").map(|v| v == "1").unwrap_or(false) {
+                    if let Some(session) = core_bg.session() {
+                        let cfg = core_bg.settings.get();
+                        let t = handle_bg.state::<std::sync::Arc<Tunnel>>().inner().clone();
+                        core::probe_log("LDM_TUNNEL: 自动开启隧道");
+                        t.start(
+                            handle_bg.clone(),
+                            tunnel::StartArgs {
+                                port: session.port,
+                                room: session.token.clone(),
+                                tunnel_token: cfg.tunnel_token.clone(),
+                                host: cfg.tunnel_host.clone(),
+                                cloudflared_path: Some(cfg.cloudflared_path.clone())
+                                    .filter(|s| !s.trim().is_empty()),
+                            },
+                        );
+                    }
+                }
                 // 网络位置探测会起一次 PowerShell，放后台
                 let core_net = Arc::clone(&core_bg);
                 tauri::async_runtime::spawn_blocking(move || core_net.refresh_network()).await.ok();
@@ -970,6 +992,7 @@ fn tunnel_start(app: AppHandle) -> Value {
             room: session.token.clone(),
             tunnel_token: cfg.tunnel_token.clone(),
             host: cfg.tunnel_host.clone(),
+            cloudflared_path: Some(cfg.cloudflared_path.clone()).filter(|s| !s.trim().is_empty()),
         },
     );
     t.snapshot()
@@ -993,4 +1016,45 @@ fn tunnel_set_auto(app: AppHandle, on: bool) -> Value {
 #[tauri::command]
 fn tunnel_state(app: AppHandle) -> Value {
     app.state::<std::sync::Arc<Tunnel>>().inner().snapshot()
+}
+
+/// 手动指定 cloudflared.exe —— 自动下载怎么都失败时的逃生口。
+///
+/// 现实中"浏览器能下、程序不能"几乎都是代理/证书环境的差异，所以必须给用户
+/// 一条自己选文件的路，而不是让他去猜某个 `%LOCALAPPDATA%` 子目录该怎么放文件。
+#[tauri::command]
+async fn app_pick_cloudflared(app: AppHandle) -> Value {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("选择 cloudflared.exe（浏览器下载的那个文件也行，不必改名）")
+        .add_filter("可执行文件", &["exe"])
+        .add_filter("全部文件", &["*"])
+        .pick_file(move |p| {
+            let _ = tx.send(p);
+        });
+
+    let Some(Some(picked)) = rx.await.ok() else {
+        return json!({ "ok": false, "canceled": true });
+    };
+    let Ok(path) = picked.into_path() else {
+        return json!({ "ok": false, "error": "路径无效" });
+    };
+
+    // 先校验再保存：选错了当场告诉用户，而不是等到开隧道时才炸
+    match tunnel::validate_exe(&path) {
+        Ok(bytes) => {
+            let core = core_of(&app);
+            core.settings.set(&json!({ "cloudflaredPath": path.to_string_lossy() }));
+            core.push_state();
+            json!({
+                "ok": true,
+                "path": path.display().to_string(),
+                "mb": (bytes as f64 / 1_048_576.0 * 10.0).round() / 10.0,
+            })
+        }
+        Err(e) => json!({ "ok": false, "error": e }),
+    }
 }

@@ -1,4 +1,4 @@
-﻿//! 设置项存储。
+//! 设置项存储。
 //!
 //! 与旧版 `src/main/store.js` **逐键对齐**：同样的键名（camelCase）、同样的取值范围、
 //! 同样的默认值、同样的落盘格式。这样讲师从旧版升级上来，`settings.json` 能直接沿用，
@@ -54,6 +54,8 @@ pub struct Settings {
     pub tunnel_token: String,
     /// 固定隧道的公开域名，例如 dm.teachergeng.space
     pub tunnel_host: String,
+    /// 手动指定的 cloudflared.exe 路径（空 = 自动下载 / 用缓存）
+    pub cloudflared_path: String,
 }
 
 pub const AREA_VALUES: [&str; 4] = ["full", "top", "middle", "bottom"];
@@ -80,6 +82,7 @@ impl Default for Settings {
             auto_replay: true,
             tunnel_token: String::new(),
             tunnel_host: String::new(),
+            cloudflared_path: String::new(),
         }
     }
 }
@@ -143,6 +146,7 @@ impl Settings {
                 "customWords" => self.custom_words = clean_string(value, 6000),
                 "tunnelToken" => self.tunnel_token = clean_string(value, 4096),
                 "tunnelHost" => self.tunnel_host = clean_string(value, 128),
+                "cloudflaredPath" => self.cloudflared_path = clean_string(value, 260),
                 "autoReplay" => {
                     self.auto_replay = match value {
                         Value::Bool(b) => *b,
@@ -307,6 +311,7 @@ pub fn settings_to_json(s: &Settings) -> Value {
         "autoReplay": s.auto_replay,
         "tunnelToken": s.tunnel_token,
         "tunnelHost": s.tunnel_host,
+        "cloudflaredPath": s.cloudflared_path,
     })
 }
 

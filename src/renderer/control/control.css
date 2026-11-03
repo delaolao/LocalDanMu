@@ -1,4 +1,4 @@
-﻿/* hidden 必须真的隐藏：卡片里多处 display:flex 会覆盖浏览器默认规则 */
+/* hidden 必须真的隐藏：卡片里多处 display:flex 会覆盖浏览器默认规则 */
 [hidden] {
   display: none !important;
 }
@@ -780,8 +780,33 @@ input[type="range"] {
   color: var(--muted-2);
 }
 
+/* 下载进度和失败原因都是多行文本，必须保留换行，否则用户看到的是一团挤在一起的字 */
+.remote-note {
+  white-space: pre-line;
+  word-break: break-word;
+}
 .remote-note.ok { color: var(--accent); }
 .remote-note.err { color: var(--danger); }
+
+.remote-actions {
+  margin: 6px 0 0;
+  display: flex;
+  gap: 8px;
+}
+
+.linkbtn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.linkbtn:hover { color: var(--accent); }
 
 .remote-body {
   display: flex;

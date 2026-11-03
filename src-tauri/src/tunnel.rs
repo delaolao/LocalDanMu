@@ -1,16 +1,16 @@
-﻿//! 远程模式（测试版）：用 Cloudflare Quick Tunnel 把本机的会话服务暴露到公网，
+//! 远程模式（测试版）：用 Cloudflare Quick Tunnel 把本机的会话服务暴露到公网，
 //! 让学员在场地 WiFi 不可用时，用手机流量也能进入。
 //!
 //! 设计取舍（这是"测试版"，刻意保持最小）：
 //! - 不内置 cloudflared（40MB，会毁掉整个应用 5MB 的体积优势），首次使用时下载到
 //!   `%LOCALAPPDATA%\localdanmu\cloudflared.exe` 并缓存
-//! - 用 Quick Tunnel（随机域名、免账号），每场重新生成即可；正式版再考虑 Named Tunnel
-//! - **没有端到端加密**：消息在 Cloudflare 边缘是明文，界面上必须如实提示
+//! - 先试 Quick Tunnel（随机域名、免账号），也支持 Named Tunnel（固定域名 + 令牌）
+//! - **端到端加密**：房间密钥放在 URL 的 `#k=` 片段里，永远不会发到 Cloudflare（见 crypto.rs）
 //!
 //! 进程生命周期：start 起子进程并读 stderr 找公网地址；stop / 应用退出时 kill。
 
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -21,8 +21,15 @@ use tauri::{AppHandle, Emitter};
 
 use crate::qr;
 
-const DOWNLOAD_URL: &str =
+/// 官方资源地址（GitHub release 的 latest 永久链接）
+const ASSET_URL: &str =
     "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
+
+/// 体积下限。实际约 53MB，低于 10MB 一定不是完整文件。
+const MIN_EXE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// 预期体积，仅用于进度文案（真实值随版本变化，只求量级对）
+const EXPECTED_BYTES: u64 = 53 * 1024 * 1024;
 
 /// 事件名：控制面板订阅它来更新按钮和二维码
 pub const EVENT: &str = "tunnel:state";
@@ -50,6 +57,8 @@ pub struct StartArgs {
     pub tunnel_token: String,
     /// 固定域名（例如 dm.example.com）
     pub host: String,
+    /// 用户手动指定的 cloudflared.exe 路径（空 = 自动下载/用缓存）
+    pub cloudflared_path: Option<String>,
 }
 
 pub struct Tunnel {
@@ -146,6 +155,9 @@ impl Tunnel {
                 g.qr.clear();
             }
         }
+        if crate::core::probe_enabled() {
+            crate::core::probe_log(&format!("tunnel[{status}] {message}"));
+        }
         let _ = app.emit(EVENT, self.snapshot());
     }
 
@@ -181,7 +193,7 @@ impl Tunnel {
     }
 
     fn run(self: &Arc<Self>, app: &AppHandle, args: StartArgs) -> Result<(), String> {
-        let bin = ensure_binary(app, self)?;
+        let bin = ensure_binary(app, self, args.cloudflared_path.as_deref())?;
         let fixed = !args.tunnel_token.is_empty();
 
         if fixed && args.host.trim().is_empty() {
@@ -472,48 +484,398 @@ fn bin_dir() -> PathBuf {
     base.join("localdanmu")
 }
 
-/// 找到 cloudflared；没有就下载一次并缓存
-fn ensure_binary(app: &AppHandle, t: &Tunnel) -> Result<PathBuf, String> {
-    let dir = bin_dir();
-    let path = dir.join("cloudflared.exe");
-    if path.is_file() {
-        return Ok(path);
+/// 下载源：**先走 GitHub 加速代理，最后才直连**。
+///
+/// 首次使用远程模式最容易失败的就是这一步：直连 GitHub release 在很多网络下会直接
+/// 超时或中途断流（本机实测如此——当初装 rustup 和 NSIS 打包工具链，也是靠同样的
+/// 代理才下下来的）。这里依次回退，并把每个源的结果都记下来，失败时一次性告诉用户。
+fn download_sources() -> Vec<(&'static str, String)> {
+    vec![
+        ("ghfast.top 加速", format!("https://ghfast.top/{ASSET_URL}")),
+        ("gh-proxy.com 加速", format!("https://gh-proxy.com/{ASSET_URL}")),
+        ("moeyy 加速", format!("https://github.moeyy.xyz/{ASSET_URL}")),
+        ("GitHub 直连", ASSET_URL.to_string()),
+    ]
+}
+
+fn human_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else {
+        format!("{:.0} KB", bytes as f64 / 1024.0)
     }
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败：{e}"))?;
-    t.set(app, "downloading", None, "首次使用，正在下载 cloudflared（约 40MB）…");
+}
 
-    let part = dir.join("cloudflared.part");
-    let _ = std::fs::remove_file(&part);
+/// curl 退出码 → 人能看懂的原因（只列常见的，其余回落）。
+fn curl_reason(code: Option<i32>) -> &'static str {
+    match code {
+        Some(6) => "DNS 解析失败",
+        Some(7) => "连不上服务器（可能被防火墙或代理拦住）",
+        Some(18) => "传输中途中断",
+        Some(22) => "服务器返回错误（HTTP 4xx/5xx）",
+        Some(28) => "超时（网络太慢或连接卡住）",
+        Some(35) => "TLS 握手失败（可能被中间设备拦截）",
+        Some(56) => "连接被重置",
+        Some(60) => "证书校验失败",
+        Some(-1) | None => "无法启动 curl",
+        _ => "网络错误",
+    }
+}
 
-    let status = Command::new("curl.exe")
+/// 校验文件确实是 Windows 可执行文件。
+///
+/// 这一步是新增的关键防线：网络被拦截、或代理/门户返回一个"状态码 200 的 HTML 错误页"
+/// 时，下载看起来是成功的，存下来的却是文本。以前会直接拿它当 exe 启动，用户只看到
+/// 一个完全看不懂的 spawn 错误，重试多少次都一样（因为坏文件在那儿，`is_file()` 就当它好了）。
+pub fn validate_exe(path: &Path) -> Result<u64, String> {
+    let len = std::fs::metadata(path)
+        .map_err(|e| format!("读不到文件：{e}"))?
+        .len();
+    if len < MIN_EXE_BYTES {
+        return Err(format!("只有 {}，明显不完整", human_size(len)));
+    }
+    let mut head = [0u8; 2];
+    std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head))
+        .map_err(|e| format!("读取文件头失败：{e}"))?;
+    if &head != b"MZ" {
+        return Err("内容不是 Windows 可执行文件（可能被网络拦截改写）".into());
+    }
+    Ok(len)
+}
+
+/// 从单个源下载，过程中持续把进度写进状态文案。
+fn download_one(
+    app: &AppHandle,
+    t: &Tunnel,
+    label: &str,
+    url: &str,
+    part: &Path,
+) -> Result<(u64, PathBuf), String> {
+    // 用"进程内唯一"的临时名，避免上一次残留的（可能还活着的）curl 把同一个文件写花。
+    // 真正的安装动作在 install_binary 里做，文件名不影响最终结果。
+    let part_path: PathBuf = {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        part.with_file_name(format!("cloudflared.{stamp}.part"))
+    };
+    let _ = std::fs::remove_file(&part_path);
+
+    let mut child = Command::new("curl.exe")
         .args([
             "-L",
             "--fail",
-            "--retry",
-            "2",
-            "--connect-timeout",
-            "20",
             // Windows 的 schannel 在吊销服务器不可达时会直接失败（CRYPT_E_REVOCATION_OFFLINE）
             "--ssl-no-revoke",
+            "--connect-timeout",
+            "20",
+            "--max-time",
+            "900",
+            // 30 秒内平均速度低于 2KB/s 就放弃，别卡在一条死连接上干等 15 分钟
+            "--speed-limit",
+            "2048",
+            "--speed-time",
+            "30",
+            "--silent",
+            "--show-error",
             "-o",
-            &part.to_string_lossy(),
-            DOWNLOAD_URL,
+            &part_path.to_string_lossy(),
+            url,
         ])
         .creation_flags(0x0800_0000)
-        .status()
-        .map_err(|e| format!("调用 curl 失败：{e}（Windows 10 1803+ 自带 curl）"))?;
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("无法启动 curl：{e}（Windows 10 1803+ 自带 curl）"))?;
 
+    // 关键：curl 也必须进 Job Object。cloudflared 早就被保护了，但下载用的 curl 之前没有——
+    // 结果 app 一被强杀（或讲师直接关窗口），curl 就成了孤儿，继续往 .part 写，
+    // 下次启动删不掉、下载内容还可能被两个进程写花。
+    #[cfg(windows)]
+    let _job = attach_job(&child);
+
+    // 必须及时把 stderr 读走，否则子进程写满管道会卡住；顺便留下失败原因
+    let reader = {
+        let pipe = child.stderr.take();
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            if let Some(mut s) = pipe {
+                let _ = std::io::Read::read_to_string(&mut s, &mut buf);
+            }
+            buf
+        })
+    };
+
+    let started = Instant::now();
+    let mut last_emit = Instant::now()
+        .checked_sub(Duration::from_secs(10))
+        .unwrap_or_else(Instant::now);
+    let mut last_bytes = 0u64;
+    let mut last_tick = Instant::now();
+    // 卡死检测：curl 的 --speed-limit 在"连接建立了但一个字节都不来"时并不可靠
+    // （实测 ghfast.top 卡了 200 多秒都没被中止），所以自己盯着：只要一段时间内
+    // 没有新数据进账，就杀掉换下一个源，而不是让讲师对着"正在连接…"干等。
+    let mut last_progress = Instant::now();
+    let mut best_bytes = 0u64;
+    const STALL_SECS: u64 = 45;
+
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) => {}
+            Err(e) => return Err(format!("等待 curl 失败：{e}")),
+        }
+
+        if last_emit.elapsed() >= Duration::from_millis(600) {
+            last_emit = Instant::now();
+            let got = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+            if got > best_bytes {
+                best_bytes = got;
+                last_progress = Instant::now();
+            } else if last_progress.elapsed() > Duration::from_secs(STALL_SECS) {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&part_path);
+                return Err(format!(
+                    "{STALL_SECS} 秒内没有收到任何新数据（已收到 {}），换下一个源",
+                    human_size(got)
+                ));
+            }
+            let elapsed = last_tick.elapsed().as_secs_f64();
+            let speed = if elapsed > 0.0 {
+                (got.saturating_sub(last_bytes)) as f64 / elapsed
+            } else {
+                0.0
+            };
+            last_bytes = got;
+            last_tick = Instant::now();
+
+            let msg = if got == 0 {
+                format!("正在连接 {label}…（已等待 {} 秒）", started.elapsed().as_secs())
+            } else {
+                let pct = (got as f64 / EXPECTED_BYTES as f64 * 100.0).min(100.0);
+                format!(
+                    "正在下载 cloudflared：{} / 约 {}（{pct:.0}%）· {}/s · 来源 {label}",
+                    human_size(got),
+                    human_size(EXPECTED_BYTES),
+                    human_size(speed as u64)
+                )
+            };
+            t.set(app, "downloading", None, &msg);
+        }
+
+        std::thread::sleep(Duration::from_millis(200));
+    };
+
+    let tail = reader.join().unwrap_or_default();
     if !status.success() {
-        let _ = std::fs::remove_file(&part);
-        return Err(format!(
-            "下载 cloudflared 失败（curl 退出码 {:?}）。可手动下载后放到：{}",
-            status.code(),
-            path.display()
-        ));
+        let _ = std::fs::remove_file(&part_path);
+        let hint = curl_reason(status.code());
+        let detail = tail.trim().lines().last().unwrap_or("").trim();
+        return Err(if detail.is_empty() {
+            format!("{hint}（curl 退出码 {:?}）", status.code())
+        } else {
+            format!("{hint}：{detail}")
+        });
     }
 
-    std::fs::rename(&part, &path).map_err(|e| format!("保存 cloudflared 失败：{e}"))?;
-    Ok(path)
+    let len = validate_exe(&part_path)?;
+    Ok((len, part_path))
+}
+
+/// 把下载好的临时文件"安装"成正式文件。
+///
+/// 为什么不能直接 rename：**Windows 上 rename 到已存在的目标会直接失败**，
+/// 杀毒软件短暂占用句柄时也会失败。实测发现过"下载完成了 52MB、却因为改名失败
+/// 而报错、下次又从头下"的残留（目录里躺着一个完整的 cloudflared.part），
+/// 所以这里先删目标，失败再退化成复制。
+fn install_binary(from: &Path, to: &Path) -> Result<(), String> {
+    let _ = std::fs::remove_file(to);
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to).map_err(|e| format!("保存 cloudflared 失败：{e}"))?;
+    let _ = std::fs::remove_file(from);
+    Ok(())
+}
+/// 在几个"用户很可能已经把文件下到这儿"的目录里找现成的 cloudflared。
+///
+/// 实测反馈：自动下载失败时，人的第一反应就是用浏览器手动下载到「下载」文件夹。
+/// 旧版本完全无视那个文件，非要自己再下一遍——于是用户只能手动改名、手动搬到
+/// `%LOCALAPPDATA%\localdanmu\` 才能用。这里主动找一下，找到就直接复制进缓存。
+fn find_nearby_cloudflared() -> Option<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(profile);
+        dirs.push(p.join("Downloads"));
+        dirs.push(p.join("Desktop"));
+    }
+    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
+        dirs.push(exe_dir);
+    }
+
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if !name.starts_with("cloudflared") || !name.ends_with(".exe") {
+                continue;
+            }
+            if validate_exe(&path).is_ok() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+/// 找到 cloudflared：优先用户手动指定的 → 缓存 → 依次尝试各下载源。
+fn ensure_binary(
+    app: &AppHandle,
+    t: &Tunnel,
+    override_path: Option<&str>,
+) -> Result<PathBuf, String> {
+    // 1) 手动指定的路径。这是"自动下载怎么都不行"时的逃生口——
+    //    浏览器能下载、程序不能，几乎都是代理/证书环境的差异。
+    crate::core::probe_log(&format!(
+        "ensure_binary: 入口 override={:?} 目标={}",
+        override_path,
+        bin_dir().join("cloudflared.exe").display()
+    ));
+    if let Some(raw) = override_path.map(str::trim).filter(|s| !s.is_empty()) {
+        let p = PathBuf::from(raw);
+        return match validate_exe(&p) {
+            Ok(_) => Ok(p),
+            Err(e) => Err(format!(
+                "设置里指定的 cloudflared 不可用（{e}）：{}\n请重新指定，或清空这项设置改回自动下载。",
+                p.display()
+            )),
+        };
+    }
+
+    let dir = bin_dir();
+    let path = dir.join("cloudflared.exe");
+
+    // 2) 缓存。**必须校验**：以前只看文件在不在，于是半截文件/被改写的内容会被
+    //    一直当成好 exe 用下去，重试多少次都失败，且错误信息毫无线索。
+    crate::core::probe_log(&format!("ensure_binary: 缓存存在={}", path.is_file()));
+    if path.is_file() {
+        match validate_exe(&path) {
+            Ok(_) => {
+                crate::core::probe_log(&format!("ensure_binary: 缓存有效，直接用 {}", path.display()));
+                return Ok(path)
+            }
+            Err(e) => {
+                let bad = dir.join("cloudflared.exe.bad");
+                let _ = std::fs::remove_file(&bad);
+                let _ = std::fs::rename(&path, &bad);
+                t.set(
+                    app,
+                    "downloading",
+                    None,
+                    &format!("已缓存的 cloudflared 不可用（{e}），将重新下载…"),
+                );
+            }
+        }
+    }
+
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败：{e}"))?;
+    // 清掉以前失败留下的分片：每份 50MB 上下，不清理会白白占空间
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.starts_with("cloudflared") && name.ends_with(".part") {
+                let stale = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|age| age.as_secs() > 3600)
+                    .unwrap_or(true);
+                if stale {
+                    let _ = std::fs::remove_file(&p);
+                }
+            }
+        }
+    }
+
+    // 2.5) 用户可能已经用浏览器手动下载好了（下载/桌面/exe 同级目录），先找一下。
+    //      注意用 copy 而不是 move：不能把人家的原文件搬走。
+    if let Some(found) = find_nearby_cloudflared() {
+        crate::core::probe_log(&format!("ensure_binary: 发现现成文件 {}", found.display()));
+        t.set(
+            app,
+            "downloading",
+            None,
+            &format!("发现已下载的 cloudflared，正在复制到缓存目录…（{}）", found.display()),
+        );
+        if std::fs::copy(&found, &path).is_ok() && validate_exe(&path).is_ok() {
+            t.set(app, "starting", None, "cloudflared 已就绪（使用本机已有文件），正在建立隧道…");
+            return Ok(path);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // 3) 依次尝试各个源
+    let part = dir.join("cloudflared.part");
+    let sources = download_sources();
+    let mut failures: Vec<String> = Vec::new();
+
+    for (i, (label, url)) in sources.iter().enumerate() {
+        t.set(
+            app,
+            "downloading",
+            None,
+            &format!(
+                "首次使用，正在下载 cloudflared（约 {}）——第 {}/{} 个源：{label}…",
+                human_size(EXPECTED_BYTES),
+                i + 1,
+                sources.len()
+            ),
+        );
+
+        crate::core::probe_log(&format!("ensure_binary: 尝试源 {label}"));
+        match download_one(app, t, label, url, &part) {
+            Ok((bytes, written)) => {
+                // 用 download_one 实际写入的那个临时文件（名字带时间戳）来安装，
+                // 不能再用这里的 part——两者不是同一个文件（这里踩过一次）。
+                install_binary(&written, &path)?;
+                t.set(
+                    app,
+                    "starting",
+                    None,
+                    &format!(
+                        "cloudflared 已就绪（{}，来源 {label}），正在建立隧道…",
+                        human_size(bytes)
+                    ),
+                );
+                return Ok(path);
+            }
+            Err(e) => failures.push(format!("{label}：{e}")),
+        }
+    }
+
+    let _ = std::fs::remove_file(&part);
+    Err(format!(
+        "下载 cloudflared 失败，{} 个源都试过了：\n{}\n\n\
+         办法一：点面板上的「手动指定 cloudflared」选中你自己下载的 exe。\n\
+         办法二：手动下载后放到这个路径（文件名必须是 cloudflared.exe）：\n{}\n\
+         下载地址：{ASSET_URL}",
+        failures.len(),
+        failures
+            .iter()
+            .map(|f| format!("· {f}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        path.display()
+    ))
 }
 
 #[cfg(windows)]

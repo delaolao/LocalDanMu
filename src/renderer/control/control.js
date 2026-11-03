@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -365,6 +365,30 @@
     const p = active ? api.tunnelStop() : api.tunnelStart();
     p.then(paintTunnel).catch(() => toast('远程模式切换失败'));
   });
+
+  // 自动下载失败时的逃生口：让讲师直接选一个自己下载好的 cloudflared.exe。
+  // 现场最常见的失败原因是公司/酒店网络对 GitHub 的拦截，而浏览器往往能下——
+  // 与其让讲师去猜 %LOCALAPPDATA% 下该放哪，不如给个"选文件"按钮。
+  const pickBtn = $('remotePickBtn');
+  if (pickBtn && api.pickCloudflared) {
+    pickBtn.addEventListener('click', () => {
+      pickBtn.disabled = true;
+      api
+        .pickCloudflared()
+        .then((r) => {
+          if (!r || r.canceled) return;
+          if (r.ok) {
+            toast(`已指定 cloudflared（${r.mb} MB），点「重试」重新开启远程模式`);
+          } else {
+            toast(`这个文件不能用来开隧道：${r.error || '未知原因'}`);
+          }
+        })
+        .catch(() => toast('选择文件失败'))
+        .finally(() => {
+          pickBtn.disabled = false;
+        });
+    });
+  }
 
   $('modeScroll').addEventListener('click', () => guard(api.setMode('scroll')));
   $('modeCloud').addEventListener('click', () => guard(api.setMode('cloud')));

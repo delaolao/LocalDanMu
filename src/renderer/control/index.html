@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN" data-theme="system">
   <head>
     <meta charset="utf-8" />
@@ -58,6 +58,9 @@
           <button class="btn small" id="remoteBtn" type="button">开启</button>
         </div>
         <p class="remote-note" id="remoteNote">场地 WiFi 不稳定时，让学员用手机流量扫码进入。内容端到端加密，中继看不到消息正文。</p>
+        <p class="remote-actions">
+          <button class="linkbtn" id="remotePickBtn" type="button">手动指定 cloudflared</button>
+        </p>
         <div class="remote-body" id="remoteQrWrap" hidden>
           <img id="remoteQr" alt="远程入口二维码" />
           <div class="remote-url" id="remoteUrl"></div>
