@@ -1,4 +1,7 @@
-# 培训弹幕 · 实现文档（Tauri 版 v0.2.0）
+# 培训弹幕 · 实现文档（Tauri 版 v0.3.5）
+
+> 覆盖范围：局域网模式 + **远程模式**（Cloudflare 隧道 + 端到端加密）。
+> 远程模式的完整使用说明见 `docs/remote-tunnel.md`；本文讲**实现**与**为什么这么写**。
 
 > 对应需求：**《线下培训弹幕互动平台（自建私密版）需求方案 v1.0》**
 > 上一代实现：Electron 版 `v0.1.7`（同一仓库的 `LocalDanMu/`，只读参照，不再改动）
@@ -32,6 +35,7 @@
 | 绿色版 | 整个文件夹（~250MB 解压） | **一个 zip 2.28 MB**（exe + 一个标记文件） | |
 | 运行时依赖 | 自带 Chromium + Node；`koffi` 原生模块需 `asarUnpack` | 系统 WebView2；无 npm 依赖、无原生模块 | |
 | 冷启动 | 1~2s | 明显更快（无 Node 引导） | 待真机细测 |
+| 远程模式（v0.3+） | 无 | 隧道客户端 cloudflared **不进安装包**，首次使用按需下载到 `%LOCALAPPDATA%\localdanmu\` | 见 §5.7 |
 
 代价只有一个：**依赖系统 WebView2 运行时**。Windows 11 自带；Win10 装过 Edge 基本都有。
 这是把 110MB 换成 5MB 必须付的账。
@@ -333,10 +337,78 @@ Tauri 版里**只保留轮询这条**，它从"兜底"变成了"主路径"：
 | WebView2 数据 | 系统默认位置（Tauri 未重定向） | — |
 
 **没有任何外发请求**（除用户主动点的"打开网络设置""打开仓库"）。
-`LDM_PROBE=1` 时会把房间口令写到 `%TEMP%\localdanmu-debug\` 供自动化探针使用——
-默认关闭，release 产物不带这个行为。
+诊断开关全部走环境变量，**默认关闭**，release 产物不带这些行为：
+
+| 变量 | 作用 |
+| --- | --- |
+| `LDM_PROBE=1` | 把房间口令等信息写到 `%TEMP%\localdanmu-debug\`，供自动化探针读取 |
+| `LDM_BIND=127.0.0.1` | 只监听回环。自动化测试必须用：非回环监听会触发 Windows 防火墙对话框，那个对话框会变暗桌面并独占输入（见 §10 坑 5） |
+| `LDM_TOKEN=xxx` | 固定房间口令（仅 debug 构建生效），省得每次找 token |
+| `LDM_TUNNEL=1` | 开机自动开一次隧道，用于不依赖 GUI 点击验证远程链路 |
 
 ---
+
+### 5.7 远程模式：隧道 + 端到端加密 + cloudflared 获取
+
+场地 WiFi 不可靠时，用一条 Cloudflare 隧道把本机会话服务暴露到公网，让学员用手机流量进来。
+设计上有三个必须守住的点：**不扩大体积、不暴露明文、不留下孤儿进程**。
+
+#### 5.7.1 为什么不内置 cloudflared
+
+cloudflared 单个 exe 约 **53MB**，内置会让 5.5MB 的安装包直接膨胀十倍，违背换栈的初衷。
+所以按需获取：`%LOCALAPPDATA%\localdanmu\cloudflared.exe`，一次下载长期缓存。
+
+获取顺序（`tunnel.rs::ensure_binary`）：
+
+```
+① 设置里的 cloudflaredPath（用户手动指定的）
+② 「下载 / 桌面 / exe 同级目录」里现成的 cloudflared*.exe（校验通过就复制进来，不搬走原文件）
+③ 缓存文件（必须校验通过）
+④ 依次尝试 4 个下载源：ghfast.top → gh-proxy.com → moeyy → GitHub 直连
+```
+
+第 ② 步是针对真实反馈加的：**自动下载失败时，人的第一反应就是用浏览器手动下载到「下载」文件夹**。
+旧逻辑完全无视那个文件，非要自己再下一遍，于是用户只能手动改名、手动搬到缓存目录。现在不需要了。
+
+#### 5.7.2 下载器必须做到的四件事
+
+这四条都是踩出来的（见 §10 坑 17~22）：
+
+| 要求 | 做法 |
+| --- | --- |
+| **多源回退** | 直连 GitHub release 在很多网络下超时；代理源排前面 |
+| **真实进度** | 每 600ms 读 `.part` 体积，报`已下载 X / 约 53MB（P%）· 速度 · 来源` |
+| **校验产物** | PE 头必须是 `MZ` 且 ≥10MB；无效缓存改名 `.bad` 留证，而不是一直当它好使 |
+| **能停下** | 45 秒无新数据就换源（`curl --speed-limit` 在"连上但零字节"时不可靠）；curl 进 Job Object 防孤儿 |
+
+#### 5.7.3 端到端加密
+
+密钥一次性生成在 `crypto.rs`，只存在于 **URL 的 fragment**（`#k=…`）里：
+
+```
+https://xxx.trycloudflare.com/j/abcd2345#k=<base64url 密钥>
+```
+
+`#` 之后的内容**浏览器不会发给服务器**，所以 Cloudflare 只看到"有人在发消息"，看不到密钥，也解不开内容。
+消息体用 AES-256-GCM；服务端对 `enc=1` 的连接要求必须密文，明文会被 `bad_enc` 拒绝。
+
+#### 5.7.4 进程生命周期（防孤儿）
+
+cloudflared 与下载用的 curl **都**放进同一个 Windows Job Object
+（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`）：应用无论正常退出、崩溃还是被任务管理器强杀，
+系统都会连带收掉整棵子进程树。没有这一层，cloudflared 会留在后台占着端口，curl 会继续往 `.part` 写。
+
+#### 5.7.5 隧道生命周期
+
+```
+start → 取 cloudflared → 生成密钥 → spawn cloudflared → 读 stderr 找公网地址 → running
+   ↑                                                              │
+   └──── schedule_restart（自动续连，可关） ←──── 进程异常退出 ←──┘
+stop  → kill 子进程 + 清密钥 + 关 Job Object
+```
+
+`--no-autoupdate --loglevel info` 是必须的：前者防止 cloudflared 自我更新时把进程换掉，
+后者保证能从 stderr 稳定解析出地址。
 
 ## 6. 契约速查
 
@@ -375,6 +447,8 @@ Tauri 版里**只保留轮询这条**，它从"兜底"变成了"主路径"：
 | `app_open_repo` / `app_open_network_settings` / `app_refresh_network` | 打开仓库 / 网络设置 / 刷新网卡 |
 | `app_hide_panel` / `app_minimize` / `app_quit` / `join_close` | 窗口控制 |
 | `dm_hover` / `dm_modal` / `dm_ready` | 接管鼠标 / 大图模式 / 渲染就绪 |
+| `tunnel_start` / `tunnel_stop` / `tunnel_state` / `tunnel_set_auto` | 远程模式开关、查询、自动续连 |
+| `app_pick_cloudflared` | 手动指定 cloudflared.exe（自动下载失败时的逃生口，选完先校验再存） |
 
 **事件（Rust → 渲染层）**：`state`、`dm:item`、`dm:item-full`、`dm:cmd`、`dm:like`、
 `dm:cursor`、`dm:click`。
@@ -404,6 +478,9 @@ Tauri 版里**只保留轮询这条**，它从"兜底"变成了"主路径"：
 | `filterLevel` | off/mark/block | block | 过滤强度 |
 | `autoReplay` | bool | true | 高赞是否自动重新上屏 |
 | `customWords` | string ≤6000 | '' | 自定义词表 |
+| `tunnelToken` | string ≤4096 | '' | 固定隧道令牌；留空则用临时隧道 |
+| `tunnelHost` | string ≤128 | '' | 固定域名（如 dm.example.com） |
+| `cloudflaredPath` | string ≤260 | '' | 手动指定的 cloudflared.exe；空 = 自动获取 |
 
 ---
 
@@ -445,7 +522,7 @@ cd src-tauri; cargo run
 # 打包（安装包 + 绿色 zip，产物在 dist\）
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-win.ps1
 
-# 单元 + 协议集成测试（43 个）
+# 单元 + 协议集成测试（52 个）
 cd src-tauri; cargo test
 
 # 端到端探针（HTTP/WS/穿透/置顶/焦点），对 release 也能跑
@@ -465,6 +542,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\probe-app.ps1 -Exe "
 | 协议集成测试 | `server.rs` 内 11 个 `#[tokio::test]` | 起真监听、真 WS 客户端：hello/ack/item、幂等、过滤不占额度、单人间隔、点赞、快捷反应、广播、最近历史、401/403 |
 | 端到端探针 | `scripts\probe-app.ps1` | 真进程：HTTP 服务、口令门、内嵌资源、WS 协议、弹幕层透明/置顶/穿透/不抢焦点 |
 | 真实层叠验证 | 探针内置"品红全屏置顶已激活窗口" | 模拟 PPT 放映，验证弹幕层仍在其上 |
+| 远程链路 | `tools/probe-e2e.js` / `probe-tunnel.js` / `probe-lan.js` | 隧道可达性、端到端加密握手、局域网对照 |
+| 交互诊断 | `scripts/diag-*.js`（CDP） | 直接问运行中的页面：IPC 是否可用、事件计数、坐标单位、对话框是否卡死 |
+
+**两套工具的分工，别重复造轮子**：
+
+| 工具 | 位置 | 管什么 | 依赖 |
+| --- | --- | --- | --- |
+| 端到端探针 | `scripts/probe-app.ps1`、`probe-features.ps1` | **本机几何与系统行为**：透明 / 置顶 / 点击穿透 / 不抢焦点 / 快捷键 / 窗口出现 | 真实进程 + Win32 + 屏幕取色 |
+| 远程链路探针 | `tools/*.js` | **网络链路**：隧道可达、加密握手、局域网对照 | 需要真实隧道地址与房间号 |
+| CDP 诊断 | `scripts/diag-*.js`、`tools/cdp.js` | **页面内部状态**：逐条调用 IPC 看原始报错、数事件、量坐标 | 需 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` |
+| 离线自检 | `tools/ipv6-check/` | 现场 IPv6 入站是否可用（独立小工具，不参与主构建） | 无 |
 
 **经验**：涉及"鼠标能不能点到""能不能压住 PPT"的，必须用真实输入与真实窗口验证。
 探针里那套 `mouse_event` + `GetForegroundWindow` + `GetWindow(GW_HWNDNEXT)` 就是为此存在，
@@ -491,7 +579,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\probe-app.ps1 -Exe "
 | 13 | 切到词云时**滚动弹幕层迟迟不消失**，两层同时可见 2 秒 | 弹幕层当初用裸 `ShowWindow(SW_SHOWNOACTIVATE)` 显示，导致 tao 内部的"可见性"状态与真实状态不一致，之后 `win.hide()` 变成空操作（`toggleOverlay` 返回 `overlayVisible:false`，窗口却还在） | 显示/隐藏一律走 Tauri 的 `win.show()` / `win.hide()`；不抢焦点交给 `WS_EX_NOACTIVATE` 保证（探针的 never-steals-focus 断言守着）。`apply_mode` 固定"先藏弹幕层再建词云"的顺序 |
 | 14 | 「设置与网络」下**所有下拉框点开就收回** | 置顶守护每 350ms 对控制面板 `SetWindowPos(HWND_TOPMOST)` 重排 z 序；Chromium 的原生 `<select>` 弹出列表属于该窗口，属主一被重排就立刻关闭。焦点没被抢（实测 5s 内前台只变 1 次） | 守护加判断：**控制面板已是前台窗口时不要动它**，只有被别的置顶窗口盖住时才抢回来 |
 | 15 | **图片弹幕鼠标滑过毫无反应**（悬停不暂停、点不开大图） | `GetCursorPos()` 与 `outer_position()` 都是**物理像素**，而 canvas/弹幕条是 **CSS 像素**；本机 150% 缩放 → 坐标整体偏 1.5 倍，命中测试永远打不中。旧版 Electron 里 `getCursorScreenPoint()` 与 `getBounds()` 都是 DIP，天然一致，所以当年没暴露 | 推送前除以 `scale_factor()`。实测：物理 (600,450) → CSS (400,300) |
-| 16 | 想给 WebView2 传 Chromium 开关关掉渲染节流，结果**启动即崩** | `background_throttling()` 文档写明 Windows 不支持；改用 `additional_browser_args()` 后，即使传 wry 自己的默认串也 `failed to create webview: WebView2 error HRESULT(0x8007139F)` | 放弃该方案，改用坑 13 的显示/隐藏修正来保证切换不迟钝，不再传自定义 args |
+| 16 | 想给 WebView2 传 Chromium 开关关掉渲染节流，结果**启动即崩** |'@ '坑16 占位'
+Apply '| 放弃该方案，改用坑 13 的显示/隐藏修正来保证切换不迟钝，不再传自定义 args |' @'
+| 放弃该方案，改用坑 13 的显示/隐藏修正来保证切换不迟钝，不再传自定义 args |
+| 17 | 首次开远程模式，**下载 cloudflared 屡次失败且界面毫无反馈** | 只有单一源（GitHub releases 直连），且用 `curl .status()` 静默等待 53MB | 4 源顺序回退 + 边下边报进度（已下载量 / 百分比 / 速度 / 来源 / 已等待秒数） |
+| 18 | 下载"成功"了，但启动云隧道报一个看不懂的 spawn 错误，重试多少次都一样 | **只看文件在不在，从不校验内容**。一次失败会留下半截文件或被代理改写成 HTML 的"exe"，而 `is_file()` 把它当成好文件一直用下去 | 校验 PE 头 `MZ` + 体积下限；无效缓存改名 `.bad` 留证后重新获取 |
+| 19 | 目录里躺着一个完整 52.82MB 的 `cloudflared.part`，但 exe 始终没出现 | Windows 上 `rename` 到**已存在**的目标会直接失败；杀软短暂占用句柄也会失败 | `install_binary`：先删目标 → `rename` → 失败退化为 `copy` + 删源 |
+| 20 | 进度跑到 99% 后报 `保存失败：系统找不到指定的文件 (os error 2)` | 给每次尝试加了唯一 `.part` 名，但安装时用的仍是旧的固定名，两者不是同一个文件 | `download_one` 返回**实际写入的路径**，安装用它而不是调用方猜的路径 |
+| 21 | 强杀应用后，一个 **孤儿 curl** 一直在往 `.part` 写，下次启动删不掉、内容还被写花 | cloudflared 早就进了 Job Object，但**下载用的 curl 没有** | curl 同样纳入 Job Object；每次尝试用独立 `.part` 名；过期分片自动清理 |
+| 22 | 某个代理源**连上后一个字节都不来**，`--speed-limit` 也没能中止，白等 200+ 秒 | curl 的低速中止在"连接建立但零字节"场景下不可靠 | 自己按秒盯进度：45 秒无新数据就 kill 并换下一个源 | `background_throttling()` 文档写明 Windows 不支持；改用 `additional_browser_args()` 后，即使传 wry 自己的默认串也 `failed to create webview: WebView2 error HRESULT(0x8007139F)` | 放弃该方案，改用坑 13 的显示/隐藏修正来保证切换不迟钝，不再传自定义 args |
 
 其它已知限制（沿用旧版）：
 
