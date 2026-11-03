@@ -7,9 +7,10 @@
 // Node 22+ 自带 WebSocket，不需要 ws 包
 const expr = process.argv[2];
 const match = process.argv[3] || 'control';
+const PORT = Number(process.env.CDP_PORT || 9222);
 
 (async () => {
-  const list = await (await fetch('http://127.0.0.1:9222/json')).json();
+  const list = await (await fetch('http://127.0.0.1:' + PORT + '/json')).json();
   const page = list.find((t) => t.type === 'page' && (!match || t.url.includes(match))) || list[0];
   if (!page) throw new Error('没有可用的页面');
   const ws = new WebSocket(page.webSocketDebuggerUrl);
