@@ -1,4 +1,4 @@
-# 远程模式（测试版）：Cloudflare Quick Tunnel
+﻿# 远程模式（测试版）：Cloudflare Quick Tunnel
 
 > 状态：**分支测试版**，未合入 `main`。
 > 目的：验证"场地 WiFi 不可用时，学员用手机流量也能进"这条路走不走得通。
@@ -26,7 +26,17 @@ https://xxx.trycloudflare.com/j/<房间号>
 3. 从它的 stderr 里抓 `https://*.trycloudflare.com`
 4. 拼成 `https://<隧道>/j/<房间号>`，生成二维码推到面板
 
-关闭或退出程序时，子进程会被显式 kill（已实测无孤儿进程）。
+关闭或退出程序时，子进程会被显式 kill。
+
+**更强的保证**：子进程被放进一个 Windows **Job Object**（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`）。
+这样即使应用被任务管理器强杀、或者崩溃，系统也会在进程句柄关闭时连带杀掉 cloudflared——
+不会出现"后台还挂着一个隧道"的情况。实测：
+
+| 操作 | cloudflared 进程数 |
+| --- | --- |
+| 开启隧道 | 1 |
+| 点「关闭」 | 0 |
+| **任务管理器强杀应用** | **0** |
 
 ## 实测数据（本机 → Cloudflare 边缘）
 

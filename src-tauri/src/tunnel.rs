@@ -34,6 +34,9 @@ struct Inner {
     message: String,
     qr: String,
     child: Option<Child>,
+    /// 持有 Job Object 句柄：进程退出（含被强杀）时系统会连带杀掉 cloudflared
+    #[cfg(windows)]
+    job: Option<JobGuard>,
 }
 
 pub struct Tunnel {
@@ -101,6 +104,7 @@ impl Tunnel {
         let bin = ensure_binary(app, self)?;
         self.set(app, "starting", None, "正在建立隧道…");
 
+        #[allow(unused_mut)]
         let mut child = Command::new(&bin)
             .args([
                 "tunnel",
@@ -115,6 +119,10 @@ impl Tunnel {
             .creation_flags(0x0800_0000) // CREATE_NO_WINDOW：不弹黑框
             .spawn()
             .map_err(|e| format!("启动 cloudflared 失败：{e}"))?;
+
+        // 关键：先把子进程放进 Job Object，再开始读它的输出
+        #[cfg(windows)]
+        let job = attach_job(&child);
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -155,6 +163,10 @@ impl Tunnel {
         {
             let mut g = self.inner.lock().unwrap();
             g.child = Some(child);
+            #[cfg(windows)]
+            {
+                g.job = job;
+            }
         }
 
         // 40 秒没拿到地址就判定失败
@@ -198,6 +210,10 @@ impl Tunnel {
             let _ = child.kill();
             let _ = child.wait();
         }
+        #[cfg(windows)]
+        {
+            g.job = None;
+        }
         let was = g.status.clone();
         let mut g2 = g;
         g2.status = "idle".into();
@@ -218,6 +234,63 @@ impl Tunnel {
             let _ = child.kill();
             let _ = child.wait();
         }
+        #[cfg(windows)]
+        {
+            g.job = None;
+        }
+    }
+}
+
+/* ------------------------------------------------------------ Job Object */
+
+/// 把子进程放进一个「句柄关闭即杀进程」的 Job Object。
+/// 这样即使应用被任务管理器强杀、或崩溃，cloudflared 也不会留在后台。
+/// 保存为整数句柄：HANDLE 在 windows-sys 里是 `*mut c_void`，不实现 Send，
+/// 而 Tunnel 会被多个线程共享；用 isize 存、用到时再转回去。
+#[cfg(windows)]
+struct JobGuard(isize);
+
+#[cfg(windows)]
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0 as _) };
+    }
+}
+
+#[cfg(windows)]
+fn attach_job(child: &Child) -> Option<JobGuard> {
+    use std::mem::size_of;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return None;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            windows_sys::Win32::Foundation::CloseHandle(job);
+            return None;
+        }
+        let process = child.as_raw_handle() as *mut core::ffi::c_void;
+        if AssignProcessToJobObject(job, process) == 0 {
+            // 已经在别的 job 里（Win8 之前不支持嵌套），退化为普通子进程
+            windows_sys::Win32::Foundation::CloseHandle(job);
+            return None;
+        }
+        Some(JobGuard(job as isize))
     }
 }
 

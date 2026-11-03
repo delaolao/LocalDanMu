@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "localdanmu"
 version = "0.2.0"
 description = "线下培训弹幕互动平台（局域网自建版，数据不出本机）"
@@ -41,6 +41,15 @@ rust-embed = "8"
 
 # 网卡枚举
 if-addrs = "0.13"
+
+# Windows Job Object：父进程无论怎么退出（包括被强杀），系统都会连带杀掉 cloudflared 子进程
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
 
 # 房间口令的随机性
 getrandom = "0.3"

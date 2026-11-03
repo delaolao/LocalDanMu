@@ -2266,6 +2266,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.26.2",
  "unicode-normalization",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
