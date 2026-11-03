@@ -1,4 +1,8 @@
-﻿:root {
+﻿/* hidden 必须真的隐藏：下面有 display:flex 的元素会覆盖浏览器默认规则 */
+[hidden] {
+  display: none !important;
+}
+:root {
   --bg: #06100e;
   --text: #edfdf7;
   --muted: #87a9a0;

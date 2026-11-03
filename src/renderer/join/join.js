@@ -45,9 +45,14 @@
     if (row) row.classList.toggle('multi', on);
     const tip = $('remoteTip');
     if (tip) tip.hidden = !on;
-    if (on) {
-      const img = $('remoteQr');
-      if (img && img.src !== t.qr) img.src = t.qr;
+    const img = $('remoteQr');
+    if (img) {
+      if (on) {
+        if (img.getAttribute('src') !== t.qr) img.src = t.qr;
+      } else {
+        // 隧道关掉后必须把旧图清掉，否则再打开时会闪一下过期二维码
+        img.removeAttribute('src');
+      }
     }
     if (line) {
       line.hidden = !on;

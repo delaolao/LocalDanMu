@@ -1,4 +1,8 @@
-﻿:root {
+﻿/* hidden 必须真的隐藏 */
+[hidden] {
+  display: none !important;
+}
+:root {
   --bg: #06100e;
   --card: #0d1f1a;
   --line: #23453c;
