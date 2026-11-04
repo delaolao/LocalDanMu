@@ -1,4 +1,4 @@
-﻿//! 远程模式（测试版）：用 Cloudflare Quick Tunnel 把本机的会话服务暴露到公网，
+//! 远程模式（测试版）：用 Cloudflare Quick Tunnel 把本机的会话服务暴露到公网，
 //! 让学员在场地 WiFi 不可用时，用手机流量也能进入。
 //!
 //! 设计取舍（这是"测试版"，刻意保持最小）：
@@ -579,6 +579,67 @@ pub fn validate_exe(path: &Path) -> Result<u64, String> {
     Ok(len)
 }
 
+/// 官方发布页的 API（直连可用，不需要代理）。用它拿到期望的 SHA-256。
+const RELEASE_API: &str = "https://api.github.com/repos/cloudflare/cloudflared/releases/latest";
+const ASSET_NAME: &str = "cloudflared-windows-amd64.exe";
+
+/// 从 GitHub API 取官方发布的 SHA-256（`digest` 字段，形如 `sha256:xxxx`）。
+///
+/// 取不到（离线、被拦、限流）时返回 None——调用方会降级为"只做大小/MZ 校验"，
+/// 并在界面上如实说明，而不是假装校验过。
+fn expected_sha256() -> Option<String> {
+    let out = Command::new("curl.exe")
+        .args([
+            "-sS",
+            "--fail",
+            "--ssl-no-revoke",
+            "--connect-timeout",
+            "10",
+            "--max-time",
+            "20",
+            "-H",
+            "Accept: application/vnd.github+json",
+            RELEASE_API,
+        ])
+        .creation_flags(0x0800_0000)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let digest = json
+        .get("assets")?
+        .as_array()?
+        .iter()
+        .find(|a| a.get("name").and_then(|v| v.as_str()) == Some(ASSET_NAME))?
+        .get("digest")?
+        .as_str()?;
+    let hex = digest.strip_prefix("sha256:")?.trim().to_ascii_lowercase();
+    if hex.len() == 64 {
+        Some(hex)
+    } else {
+        None
+    }
+}
+
+/// 流式计算文件 SHA-256（55MB 不整块读进内存）。
+fn sha256_file(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = std::io::Read::read(&mut file, &mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let digest = hasher.finalize();
+    Some(digest.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// 从单个源下载，过程中持续把进度写进状态文案。
 fn download_one(
     app: &AppHandle,
@@ -882,6 +943,13 @@ fn ensure_binary(
     let sources = download_sources();
     let mut failures: Vec<String> = Vec::new();
 
+    // 下载前先问一次官方哈希。拿不到就降级（只校验大小与 MZ），并在状态里说清楚。
+    let expected = expected_sha256();
+    match &expected {
+        Some(h) => crate::core::probe_log(&format!("ensure_binary: 官方 SHA-256 = {h}")),
+        None => crate::core::probe_log("ensure_binary: 取不到官方 SHA-256，将跳过哈希校验"),
+    }
+
     for (i, (label, url)) in sources.iter().enumerate() {
         t.set(
             app,
@@ -898,6 +966,29 @@ fn ensure_binary(
         crate::core::probe_log(&format!("ensure_binary: 尝试源 {label}"));
         match download_one(app, t, label, url, &part) {
             Ok((bytes, written)) => {
+                // 哈希校验：来源是第三方镜像，必须确认它和官方发布的是同一个文件
+                if let Some(want) = &expected {
+                    t.set(app, "downloading", None, "正在校验下载文件的 SHA-256…");
+                    match sha256_file(&written) {
+                        Some(got) if &got == want => {
+                            crate::core::probe_log("ensure_binary: SHA-256 校验通过");
+                        }
+                        Some(got) => {
+                            let _ = std::fs::remove_file(&written);
+                            failures.push(format!(
+                                "{label}：SHA-256 不匹配（期望 {}…，实际 {}…），已丢弃",
+                                &want[..12],
+                                &got[..12]
+                            ));
+                            continue;
+                        }
+                        None => {
+                            let _ = std::fs::remove_file(&written);
+                            failures.push(format!("{label}：下载完成但读不出文件，无法校验"));
+                            continue;
+                        }
+                    }
+                }
                 // 用 download_one 实际写入的那个临时文件（名字带时间戳）来安装，
                 // 不能再用这里的 part——两者不是同一个文件（这里踩过一次）。
                 install_binary(&written, &path)?;
@@ -934,3 +1025,34 @@ fn ensure_binary(
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+
+#[cfg(test)]
+mod sha_tests {
+    use super::*;
+
+    #[test]
+    fn sha256_matches_known_vector() {
+        let dir = std::env::temp_dir().join("ldm-sha-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("abc.bin");
+        std::fs::write(&p, b"abc").unwrap();
+        assert_eq!(
+            sha256_file(&p).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn sha256_differs_for_different_content() {
+        let dir = std::env::temp_dir().join("ldm-sha-test2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("x.bin");
+        std::fs::write(&p, b"abd").unwrap();
+        assert_ne!(
+            sha256_file(&p).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = std::fs::remove_file(&p);
+    }
+}

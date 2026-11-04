@@ -685,7 +685,9 @@ async fn session_end(app: AppHandle) -> Value {
 #[tauri::command]
 async fn session_restart(app: AppHandle) -> Value {
     let core = core_of(&app);
-    core.restart_session().await;
+    if let Err(err) = core.restart_session().await {
+        core.push_warning("error", &format!("重新开始失败：{err}"));
+    }
     apply_mode(&app, &core).await;
     core.build_state(&app)
 }
@@ -797,6 +799,14 @@ async fn app_refresh_network(app: AppHandle) -> Value {
     tauri::async_runtime::spawn_blocking(move || core_bg.refresh_network())
         .await
         .ok();
+    // 只刷新网卡不够：如果上次服务压根没起来，这里要把它真正拉起来
+    if let Err(err) = core.ensure_session_started().await {
+        core.set_warnings(vec![serde_json::json!({
+            "level": "error",
+            "text": format!("服务启动失败：{err}"),
+            "hint": "检查 8080 端口是否被占用，或点「重新检测」再试"
+        })]);
+    }
     core.push_state();
     core.build_state(&app)
 }

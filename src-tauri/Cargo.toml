@@ -1,6 +1,6 @@
 [package]
 name = "localdanmu"
-version = "0.3.7"
+version = "0.3.8"
 description = "线下培训弹幕互动平台（局域网自建版，数据不出本机）"
 authors = ["LocalDanMu"]
 license = "MIT"
@@ -33,6 +33,9 @@ unicode-normalization = "0.1"
 
 # 远程模式的端到端加密（AES-256-GCM）
 aes-gcm = "0.10"
+
+# 校验下载的 cloudflared 与官方发布哈希一致
+sha2 = "0.10"
 
 # 二维码（纯 Rust，替代旧版的 npm qrcode）
 qrcode = { version = "0.14", default-features = false }

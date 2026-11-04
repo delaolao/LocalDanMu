@@ -242,7 +242,16 @@ impl AppCore {
         self.online.store(0, Ordering::SeqCst);
     }
 
-    pub async fn restart_session(self: &Arc<Self>) {
+    /// 幂等确保会话已启动：没有就起一个，已有就什么都不做。
+    /// 「重新检测」这类按钮用它，避免"只刷新网卡、服务其实没起来"的死局。
+    pub async fn ensure_session_started(self: &Arc<Self>) -> Result<(), String> {
+        if self.session().is_some() {
+            return Ok(());
+        }
+        self.start_session().await
+    }
+
+    pub async fn restart_session(self: &Arc<Self>) -> Result<(), String> {
         // 房间号会换，旧隧道的 URL 必然失效，先停
         self.tunnel.stop();
         let bridge = self.bridge.lock().ok().and_then(|mut g| g.take());
@@ -252,7 +261,7 @@ impl AppCore {
         if let Ok(mut s) = self.session.lock() {
             *s = None;
         }
-        let _ = self.start_session().await;
+        self.start_session().await
     }
 
     pub fn toggle_pause(&self) -> bool {
@@ -395,6 +404,18 @@ impl AppCore {
     }
 
     /// 覆盖告警列表（启动失败、网络异常等由主程序设置）。
+    /// 追加一条警告（保留已有提示），用于"操作失败但界面还活着"的场景。
+    pub fn push_warning(&self, level: &str, text: &str) {
+        if let Ok(mut w) = self.warnings.lock() {
+            w.retain(|v| v.get("text").and_then(|t| t.as_str()) != Some(text));
+            w.push(json!({ "level": level, "text": text }));
+            if w.len() > 4 {
+                let overflow = w.len() - 4;
+                w.drain(0..overflow);
+            }
+        }
+    }
+
     pub fn set_warnings(&self, warnings: Vec<Value>) {
         if let Ok(mut w) = self.warnings.lock() {
             *w = warnings;

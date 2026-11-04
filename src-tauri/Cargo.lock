@@ -2327,7 +2327,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "localdanmu"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -2342,6 +2342,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
