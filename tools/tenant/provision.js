@@ -51,13 +51,14 @@ function randomSuffix(len = 6) {
 (async () => {
   const label = arg('label');
   if (!label) {
-    console.error('用法: node tools/tenant/provision.js --label <标识> [--host <子域>] [--dry-run]');
+    console.error('用法: node tools/tenant/provision.js --label <标识> [--host <子域>] [--dry-run] [--check]');
     process.exit(1);
   }
   const zoneName = process.env.CF_ZONE_NAME || 'teachergeng.space';
   const sub = arg('host') || `u${randomSuffix()}`;
   const hostname = sub.includes('.') ? sub : `${sub}.dm.${zoneName}`;
   const dryRun = has('dry-run');
+  const checkOnly = has('check');
 
   console.log(`账号 zone : ${zoneName}`);
   console.log(`公开主机名: ${hostname}`);
@@ -67,6 +68,16 @@ function randomSuffix(len = 6) {
     console.log(`  2. PUT  /accounts/<id>/cfd_tunnel/<tid>/configurations → ${hostname} → http://localhost:8080`);
     console.log(`  3. POST /zones/<zid>/dns_records  CNAME ${hostname} → <tid>.cfargotunnel.com`);
     console.log('  4. 写入 tools/tenant/tenants.json');
+    return;
+  }
+
+  if (checkOnly) {
+    const accountId = await cf.resolveAccountId(process.env.CF_ACCOUNT_ID);
+    console.log('\n令牌有效，能读到以下资源：');
+    console.log(`  account : ${accountId}`);
+    const zoneId = await cf.resolveZoneId(zoneName);
+    console.log(`  zone    : ${zoneId} (${zoneName})`);
+    console.log('\n可以去掉 --check 正式开通了。');
     return;
   }
 

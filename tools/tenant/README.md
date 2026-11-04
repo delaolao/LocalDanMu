@@ -39,6 +39,7 @@ node tools/tenant/provision.js --label "张三-2026春季" --host u7f3k2
 - `--label`：内部标识，写进 `tenants.json`
 - `--host`：可选，省略时自动生成 `u<随机6位>`；子域最终是 `u7f3k2.dm.teachergeng.space`
 - `--dry-run`：只打印将要做的事，不调 API
+- `--check`：只验证 API 令牌与账号/zone 解析，不建任何东西
 
 执行完会打印：
 
