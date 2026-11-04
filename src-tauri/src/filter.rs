@@ -1,4 +1,4 @@
-//! 内容过滤。与旧版 `src/main/filter.js` 行为对齐。
+﻿//! 内容过滤。与旧版 `src/main/filter.js` 行为对齐。
 //!
 //! 策略（沿用旧版判断）：中文互联网上所谓"敏感词库"绝大多数是政治审查词表，不适合内置于本产品。
 //! 培训现场真正会出事的是三类：联系方式/导流、广告话术、现场辱骂。所以：
@@ -22,11 +22,54 @@ use unicode_normalization::UnicodeNormalization;
 
 /// 内置通用辱骂词（不含任何政治词）。与旧版 WORDS 完全一致。
 pub const BUILTIN_WORDS: &[&str] = &[
-    "傻逼", "沙比", "煞笔", "傻b", "傻叉", "傻帽", "智障", "脑残", "弱智", "白痴", "废物", "滚蛋",
-    "滚开", "去死", "死全家", "你妈", "你妈的", "妈的", "他妈", "尼玛", "尼马", "卧槽", "我操",
-    "我艹", "操你", "草泥马", "草你妈", "日你", "干你", "贱人", "婊子", "妓女", "混蛋", "王八蛋",
-    "畜生", "杂种", "狗东西", "狗日的", "日了狗", "不要脸", //
-    "fuck", "fucking", "shit", "bitch", "asshole", "bastard", "dick", "cunt",
+    "傻逼",
+    "沙比",
+    "煞笔",
+    "傻b",
+    "傻叉",
+    "傻帽",
+    "智障",
+    "脑残",
+    "弱智",
+    "白痴",
+    "废物",
+    "滚蛋",
+    "滚开",
+    "去死",
+    "死全家",
+    "你妈",
+    "你妈的",
+    "妈的",
+    "他妈",
+    "尼玛",
+    "尼马",
+    "卧槽",
+    "我操",
+    "我艹",
+    "操你",
+    "草泥马",
+    "草你妈",
+    "日你",
+    "干你",
+    "贱人",
+    "婊子",
+    "妓女",
+    "混蛋",
+    "王八蛋",
+    "畜生",
+    "杂种",
+    "狗东西",
+    "狗日的",
+    "日了狗",
+    "不要脸", //
+    "fuck",
+    "fucking",
+    "shit",
+    "bitch",
+    "asshole",
+    "bastard",
+    "dick",
+    "cunt",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +99,12 @@ pub struct Verdict {
 
 impl Verdict {
     fn clean() -> Verdict {
-        Verdict { blocked: false, flagged: false, category: None, word: None }
+        Verdict {
+            blocked: false,
+            flagged: false,
+            category: None,
+            word: None,
+        }
     }
 }
 
@@ -98,10 +146,7 @@ fn rules() -> &'static [Rule] {
 pub fn normalize_loose(text: &str) -> String {
     let nfkc: String = text.nfkc().collect();
     let lowered = nfkc.to_lowercase();
-    let stripped: String = lowered
-        .chars()
-        .filter(|c| !is_invisible(*c))
-        .collect();
+    let stripped: String = lowered.chars().filter(|c| !is_invisible(*c)).collect();
     // 压缩空白（含全角空格经 NFKC 之后变成的普通空格）
     let mut out = String::with_capacity(stripped.len());
     let mut last_space = false;
@@ -139,7 +184,7 @@ fn is_invisible(c: char) -> bool {
 
 /// 解析自定义词表：换行 / 中英文逗号 / 顿号 / 分号都能分隔，最多 2000 条。
 pub fn parse_custom_words(raw: &str) -> Vec<String> {
-    raw.split(|c| matches!(c, '\r' | '\n' | ',' | '，' | '、' | ';' | '；'))
+    raw.split(['\r', '\n', ',', '，', '、', ';', '；'])
         .map(|w| w.trim().to_string())
         .filter(|w| !w.is_empty())
         .take(2000)
@@ -190,7 +235,12 @@ impl Filter {
                 AhoCorasick::new(Vec::<String>::new()).expect("空词表必然可构造")
             });
 
-        Filter { level, matcher, kinds, word_count }
+        Filter {
+            level,
+            matcher,
+            kinds,
+            word_count,
+        }
     }
 
     /// 从设置构造（设置里的 `filterLevel` / `customWords`）。
@@ -245,7 +295,11 @@ impl Filter {
                 None => true,
             };
             if better {
-                best = Some((m.pattern().as_usize(), len, strict[m.start()..m.end()].to_string()));
+                best = Some((
+                    m.pattern().as_usize(),
+                    len,
+                    strict[m.start()..m.end()].to_string(),
+                ));
             }
         }
         best.map(|(pat, _, word)| (pat, word))
@@ -262,7 +316,13 @@ mod tests {
 
     #[test]
     fn blocks_contact_and_ads() {
-        assert_eq!(block().check("有事打我电话 13800138000").category.as_deref(), Some("phone"));
+        assert_eq!(
+            block()
+                .check("有事打我电话 13800138000")
+                .category
+                .as_deref(),
+            Some("phone")
+        );
         assert!(block().check("QQ：123456789").blocked);
         assert!(block().check("加微信 abc_12345 领资料").blocked);
         assert!(block().check("看这个 https://example.com/x").blocked);
@@ -313,7 +373,10 @@ mod tests {
     fn custom_words_work_and_are_labelled() {
         let f = Filter::new(Level::Block, "竞品公司\n某品牌");
         assert!(f.check("这个比某品牌好").blocked);
-        assert_eq!(f.check("这个比某品牌好").category.as_deref(), Some("custom"));
+        assert_eq!(
+            f.check("这个比某品牌好").category.as_deref(),
+            Some("custom")
+        );
         assert!(!f.check("今天天气不错").blocked);
     }
 

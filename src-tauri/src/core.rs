@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::network;
 use crate::qr;
-use crate::server::{Bridge, BridgeConfig, MessageSink, Outgoing, Signals, ServerState};
+use crate::server::{Bridge, BridgeConfig, MessageSink, Outgoing, ServerState, Signals};
 use crate::settings::{settings_to_json, Store};
 
 pub const HISTORY_MAX_TEXT: usize = 300;
@@ -144,7 +144,10 @@ impl AppCore {
     }
 
     pub fn server_state(&self) -> Option<ServerState> {
-        self.bridge.lock().ok().and_then(|g| g.as_ref().map(|b| b.state.clone()))
+        self.bridge
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|b| b.state.clone()))
     }
 
     /// 起一场新培训：选端口、生成口令、选网卡、起服务、生成二维码。
@@ -167,7 +170,8 @@ impl AppCore {
         let picked = network::pick(settings.preferred_ip.as_deref());
         let ip = picked.address.to_string();
 
-        let filter = crate::filter::Filter::from_settings(&settings.filter_level, &settings.custom_words);
+        let filter =
+            crate::filter::Filter::from_settings(&settings.filter_level, &settings.custom_words);
 
         let sink: Arc<dyn MessageSink> = Arc::new(CoreSink {
             app: app_handle(),
@@ -274,7 +278,10 @@ impl AppCore {
             }
             if patch.get("filterLevel").is_some() || patch.get("customWords").is_some() {
                 let s = self.settings.get();
-                st.set_filter(Some(crate::filter::Filter::from_settings(&s.filter_level, &s.custom_words)));
+                st.set_filter(Some(crate::filter::Filter::from_settings(
+                    &s.filter_level,
+                    &s.custom_words,
+                )));
             }
         }
     }
@@ -368,18 +375,22 @@ impl AppCore {
             h.iter().find(|m| m.seq == seq).cloned()
         };
         if let (Some(item), Some(app)) = (item, app_handle()) {
-            let _ = app.emit_to("overlay", "dm:item-full", json!({
-                "seq": item.seq,
-                "contentType": item.content_type,
-                "payload": item.payload,
-                "color": item.color,
-                "likes": item.likes,
-                "flagged": item.flagged,
-                "flagCategory": item.flag_category,
-                "ts": item.ts,
-                "clientId": item.client_id,
-                "replay": true,
-            }));
+            let _ = app.emit_to(
+                "overlay",
+                "dm:item-full",
+                json!({
+                    "seq": item.seq,
+                    "contentType": item.content_type,
+                    "payload": item.payload,
+                    "color": item.color,
+                    "likes": item.likes,
+                    "flagged": item.flagged,
+                    "flagCategory": item.flag_category,
+                    "ts": item.ts,
+                    "clientId": item.client_id,
+                    "replay": true,
+                }),
+            );
         }
     }
 
@@ -416,19 +427,25 @@ impl AppCore {
             h.iter().find(|m| m.seq == seq).cloned()
         };
         let Some(item) = item else { return false };
-        let Some(app) = app_handle() else { return false };
-        let _ = app.emit_to("overlay", "dm:item-full", json!({
-            "seq": item.seq,
-            "contentType": item.content_type,
-            "payload": item.payload,
-            "color": item.color,
-            "likes": item.likes,
-            "flagged": item.flagged,
-            "flagCategory": item.flag_category,
-            "ts": item.ts,
-            "clientId": item.client_id,
-            "replayed": true,
-        }));
+        let Some(app) = app_handle() else {
+            return false;
+        };
+        let _ = app.emit_to(
+            "overlay",
+            "dm:item-full",
+            json!({
+                "seq": item.seq,
+                "contentType": item.content_type,
+                "payload": item.payload,
+                "color": item.color,
+                "likes": item.likes,
+                "flagged": item.flagged,
+                "flagCategory": item.flag_category,
+                "ts": item.ts,
+                "clientId": item.client_id,
+                "replayed": true,
+            }),
+        );
         let _ = app.emit("dm:replayed", json!({ "seq": seq }));
         true
     }
@@ -436,7 +453,9 @@ impl AppCore {
     /* --------------------------------------------------------- 网络与二维码 */
 
     pub fn refresh_qr(&self) {
-        let Some(session) = self.session() else { return };
+        let Some(session) = self.session() else {
+            return;
+        };
         let generated = qr::data_url(&session.url).unwrap_or_default();
         if let Ok(mut q) = self.qr.lock() {
             *q = generated;
@@ -467,9 +486,12 @@ impl AppCore {
         let profiles = self.connection_profiles_cached();
         if !profiles.is_empty() {
             let hit = profiles.iter().find(|p| {
-                p.interface_alias.eq_ignore_ascii_case(&picked.name) || p.name.eq_ignore_ascii_case(&picked.name)
+                p.interface_alias.eq_ignore_ascii_case(&picked.name)
+                    || p.name.eq_ignore_ascii_case(&picked.name)
             });
-            let any_public = hit.map(|h| h.is_public()).unwrap_or_else(|| profiles.iter().any(|p| p.is_public()));
+            let any_public = hit
+                .map(|h| h.is_public())
+                .unwrap_or_else(|| profiles.iter().any(|p| p.is_public()));
             if any_public {
                 warnings.push(json!({
                     "level": "warn",
@@ -494,7 +516,8 @@ impl AppCore {
                 Some(session) if session.ip != next_ip || session.nic_name != picked.name => {
                     session.ip = next_ip;
                     session.nic_name = picked.name.clone();
-                    session.url = format!("http://{}:{}/j/{}", session.ip, session.port, session.token);
+                    session.url =
+                        format!("http://{}:{}/j/{}", session.ip, session.port, session.token);
                     true
                 }
                 _ => false,
@@ -556,7 +579,11 @@ impl AppCore {
         let signals = self
             .server_state()
             .map(|st| st.signals())
-            .unwrap_or(Signals { total: Default::default(), recent: Default::default(), window_ms: 60000 });
+            .unwrap_or(Signals {
+                total: Default::default(),
+                recent: Default::default(),
+                window_ms: 60000,
+            });
 
         let displays = collect_displays(app);
         let selected = selected_display_id(app, settings.display_id.as_ref());
@@ -624,7 +651,11 @@ pub fn install_app_handle(app: AppHandle) {
 /// 现场排障或自动化验证时设环境变量 `LDM_PROBE=1` 即可。
 pub fn probe_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("LDM_PROBE").map(|v| v == "1").unwrap_or(false))
+    *ON.get_or_init(|| {
+        std::env::var("LDM_PROBE")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    })
 }
 
 pub fn probe_dir() -> std::path::PathBuf {
@@ -665,7 +696,9 @@ fn trim_history(history: &mut Vec<HistoryItem>) {
 
 pub fn collect_displays(app: &AppHandle) -> Vec<Value> {
     let primary = app.primary_monitor().ok().flatten();
-    let primary_name = primary.as_ref().map(|m| m.name().cloned().unwrap_or_default());
+    let primary_name = primary
+        .as_ref()
+        .map(|m| m.name().cloned().unwrap_or_default());
 
     match app.available_monitors() {
         Ok(list) => list
@@ -691,7 +724,10 @@ pub fn selected_display_id(app: &AppHandle, saved: Option<&Value>) -> String {
     let saved = saved.and_then(|v| v.as_str()).unwrap_or("");
     if !saved.is_empty() {
         if let Ok(list) = app.available_monitors() {
-            if list.iter().any(|m| m.name().map(|n| n.as_str()) == Some(saved)) {
+            if list
+                .iter()
+                .any(|m| m.name().map(|n| n.as_str()) == Some(saved))
+            {
                 return saved.to_string();
             }
         }
@@ -713,6 +749,8 @@ fn join_visible(app: &AppHandle) -> bool {
 
 /// 把服务端的回调接到窗口上。
 struct CoreSink {
+    /// 保留：自定义快捷键/托盘回调用得到（当前路径只用到 core）
+    #[allow(dead_code)]
     app: Option<AppHandle>,
     core: Arc<AppCore>,
 }
@@ -752,7 +790,11 @@ mod tests {
         HistoryItem {
             seq,
             content_type: kind.into(),
-            payload: if kind == "text" { "hi".into() } else { "data:image/png;base64,AAAA".into() },
+            payload: if kind == "text" {
+                "hi".into()
+            } else {
+                "data:image/png;base64,AAAA".into()
+            },
             color: None,
             likes: 0,
             flagged: false,

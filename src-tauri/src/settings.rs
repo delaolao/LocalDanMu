@@ -1,4 +1,4 @@
-//! 设置项存储。
+﻿//! 设置项存储。
 //!
 //! 与旧版 `src/main/store.js` **逐键对齐**：同样的键名（camelCase）、同样的取值范围、
 //! 同样的默认值、同样的落盘格式。这样讲师从旧版升级上来，`settings.json` 能直接沿用，
@@ -131,7 +131,13 @@ impl Settings {
                 "speed" => self.speed = clamp_u32(value, 4, 30, d.speed),
                 "area" => self.area = enum_of(value, &AREA_VALUES, &d.area),
                 "opacity" => self.opacity = clamp_u32(value, 30, 100, d.opacity),
-                "displayId" => self.display_id = if value.is_null() { None } else { Some(value.clone()) },
+                "displayId" => {
+                    self.display_id = if value.is_null() {
+                        None
+                    } else {
+                        Some(value.clone())
+                    }
+                }
                 "preferredIp" => {
                     self.preferred_ip = match value.as_str() {
                         Some(s) if !s.trim().is_empty() => Some(clean_string(value, 64)),
@@ -142,7 +148,9 @@ impl Settings {
                 "wifiSsid" => self.wifi_ssid = clean_string(value, 32),
                 "wifiPassword" => self.wifi_password = clean_string(value, 64),
                 "mode" => self.mode = enum_of(value, &MODE_VALUES, &d.mode),
-                "filterLevel" => self.filter_level = enum_of(value, &FILTER_LEVELS, &d.filter_level),
+                "filterLevel" => {
+                    self.filter_level = enum_of(value, &FILTER_LEVELS, &d.filter_level)
+                }
                 "customWords" => self.custom_words = clean_string(value, 6000),
                 "tunnelToken" => self.tunnel_token = clean_string(value, 4096),
                 "tunnelHost" => self.tunnel_host = clean_string(value, 128),
@@ -212,6 +220,7 @@ fn is_writable(dir: &Path) -> bool {
 /* ------------------------------------------------------------------- Store */
 
 pub struct Store {
+    #[allow(dead_code)]
     path: PathBuf,
     inner: Mutex<Settings>,
     notify: Sender<()>,
@@ -232,6 +241,7 @@ impl Store {
         store
     }
 
+    #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -255,6 +265,7 @@ impl Store {
         changed
     }
 
+    #[allow(dead_code)]
     pub fn as_json(&self) -> Value {
         serde_json::to_value(self.get()).unwrap_or(Value::Null)
     }

@@ -78,7 +78,9 @@ mod tests {
         assert!(url.starts_with("data:image/png;base64,"));
 
         let b64 = url.trim_start_matches("data:image/png;base64,");
-        let raw = base64::engine::general_purpose::STANDARD.decode(b64).expect("base64 应当可解");
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("base64 应当可解");
         assert_eq!(&raw[..8], b"\x89PNG\r\n\x1a\n", "必须是合法 PNG 头");
     }
 

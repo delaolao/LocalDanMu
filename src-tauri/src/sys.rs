@@ -12,6 +12,7 @@
 
 #![cfg(windows)]
 #![allow(non_snake_case, dead_code)]
+#![allow(clippy::upper_case_acronyms)]
 
 use std::ffi::c_void;
 
@@ -64,7 +65,15 @@ pub struct RECT {
 
 #[link(name = "user32")]
 extern "system" {
-    fn SetWindowPos(hwnd: HWND, insert_after: HWND, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+    fn SetWindowPos(
+        hwnd: HWND,
+        insert_after: HWND,
+        x: i32,
+        y: i32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> i32;
     fn GetWindowLongPtrW(hwnd: HWND, index: i32) -> isize;
     fn SetWindowLongPtrW(hwnd: HWND, index: i32, value: isize) -> isize;
     fn ShowWindow(hwnd: HWND, cmd: i32) -> i32;

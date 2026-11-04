@@ -54,7 +54,9 @@ pub fn wrap(key: &[u8; 32], plain: &str) -> Option<String> {
     if getrandom::fill(&mut iv).is_err() {
         return None;
     }
-    let sealed = cipher.encrypt(Nonce::from_slice(&iv), plain.as_bytes()).ok()?;
+    let sealed = cipher
+        .encrypt(Nonce::from_slice(&iv), plain.as_bytes())
+        .ok()?;
     Some(
         serde_json::json!({
             "type": "enc",
@@ -77,7 +79,9 @@ pub fn unwrap(key: &[u8; 32], envelope: &str) -> Option<String> {
     }
     let data = B64.decode(value.get("data")?.as_str()?).ok()?;
     let cipher = Aes256Gcm::new_from_slice(key).ok()?;
-    let plain = cipher.decrypt(Nonce::from_slice(&iv), data.as_slice()).ok()?;
+    let plain = cipher
+        .decrypt(Nonce::from_slice(&iv), data.as_slice())
+        .ok()?;
     String::from_utf8(plain).ok()
 }
 
@@ -120,7 +124,10 @@ mod tests {
         let mut bytes = data.into_bytes();
         bytes[0] = if bytes[0] == b'A' { b'B' } else { b'A' };
         v["data"] = serde_json::Value::String(String::from_utf8(bytes).unwrap());
-        assert!(unwrap(&key, &v.to_string()).is_none(), "改过的密文必须校验失败");
+        assert!(
+            unwrap(&key, &v.to_string()).is_none(),
+            "改过的密文必须校验失败"
+        );
     }
 
     #[test]

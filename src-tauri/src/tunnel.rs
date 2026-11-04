@@ -95,6 +95,7 @@ impl Tunnel {
         })
     }
 
+    #[allow(dead_code)]
     pub fn auto(&self) -> bool {
         self.auto.load(Ordering::SeqCst)
     }
@@ -180,7 +181,11 @@ impl Tunnel {
             &app_self,
             "starting",
             None,
-            if fixed { "正在连接固定隧道…" } else { "正在准备隧道…" },
+            if fixed {
+                "正在连接固定隧道…"
+            } else {
+                "正在准备隧道…"
+            },
         );
 
         std::thread::spawn(move || {
@@ -206,7 +211,11 @@ impl Tunnel {
             app,
             "starting",
             None,
-            if fixed { "正在连接固定隧道…" } else { "正在建立隧道…" },
+            if fixed {
+                "正在连接固定隧道…"
+            } else {
+                "正在建立隧道…"
+            },
         );
 
         // 每次开启生成一把新密钥；URL 里带 #k=，它不会发给 Cloudflare
@@ -276,7 +285,12 @@ impl Tunnel {
         let me2 = Arc::clone(self);
         let app2 = app.clone();
         let token = args.room.clone();
-        let host = args.host.trim().trim_start_matches("https://").trim_end_matches('/').to_string();
+        let host = args
+            .host
+            .trim()
+            .trim_start_matches("https://")
+            .trim_end_matches('/')
+            .to_string();
         let frag = frag.clone();
         let url_re = regex::Regex::new(r"https://[a-z0-9-]+\.trycloudflare\.com").unwrap();
 
@@ -322,7 +336,14 @@ impl Tunnel {
                     .lock()
                     .ok()
                     .and_then(|g| {
-                        let keys = ["not valid", "Unauthorized", "error", "failed", "invalid", "denied"];
+                        let keys = [
+                            "not valid",
+                            "Unauthorized",
+                            "error",
+                            "failed",
+                            "invalid",
+                            "denied",
+                        ];
                         g.iter()
                             .find(|l| keys.iter().any(|k| l.to_lowercase().contains(k)))
                             .or_else(|| g.last())
@@ -364,7 +385,12 @@ impl Tunnel {
                     return;
                 }
             }
-            me3.set(&app3, "error", None, "隧道启动超时（40 秒），可能是网络无法访问 Cloudflare");
+            me3.set(
+                &app3,
+                "error",
+                None,
+                "隧道启动超时（40 秒），可能是网络无法访问 Cloudflare",
+            );
             me3.schedule_restart();
         });
 
@@ -470,7 +496,7 @@ fn attach_job(child: &Child) -> Option<JobGuard> {
             windows_sys::Win32::Foundation::CloseHandle(job);
             return None;
         }
-        let process = child.as_raw_handle() as *mut core::ffi::c_void;
+        let process = child.as_raw_handle();
         if AssignProcessToJobObject(job, process) == 0 {
             // 已经在别的 job 里（Win8 之前不支持嵌套），退化为普通子进程
             windows_sys::Win32::Foundation::CloseHandle(job);
@@ -495,8 +521,14 @@ fn bin_dir() -> PathBuf {
 fn download_sources() -> Vec<(&'static str, String)> {
     vec![
         ("ghfast.top 加速", format!("https://ghfast.top/{ASSET_URL}")),
-        ("gh-proxy.com 加速", format!("https://gh-proxy.com/{ASSET_URL}")),
-        ("moeyy 加速", format!("https://github.moeyy.xyz/{ASSET_URL}")),
+        (
+            "gh-proxy.com 加速",
+            format!("https://gh-proxy.com/{ASSET_URL}"),
+        ),
+        (
+            "moeyy 加速",
+            format!("https://github.moeyy.xyz/{ASSET_URL}"),
+        ),
         ("GitHub 直连", ASSET_URL.to_string()),
     ]
 }
@@ -656,7 +688,10 @@ fn download_one(
             last_tick = Instant::now();
 
             let msg = if got == 0 {
-                format!("正在连接 {label}…（已等待 {} 秒）", started.elapsed().as_secs())
+                format!(
+                    "正在连接 {label}…（已等待 {} 秒）",
+                    started.elapsed().as_secs()
+                )
             } else {
                 let pct = (got as f64 / EXPECTED_BYTES as f64 * 100.0).min(100.0);
                 format!(
@@ -715,12 +750,17 @@ fn find_nearby_cloudflared() -> Option<PathBuf> {
         dirs.push(p.join("Downloads"));
         dirs.push(p.join("Desktop"));
     }
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.to_path_buf()))
+    {
         dirs.push(exe_dir);
     }
 
     for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             let name = path
@@ -771,8 +811,11 @@ fn ensure_binary(
     if path.is_file() {
         match validate_exe(&path) {
             Ok(_) => {
-                crate::core::probe_log(&format!("ensure_binary: 缓存有效，直接用 {}", path.display()));
-                return Ok(path)
+                crate::core::probe_log(&format!(
+                    "ensure_binary: 缓存有效，直接用 {}",
+                    path.display()
+                ));
+                return Ok(path);
             }
             Err(e) => {
                 let bad = dir.join("cloudflared.exe.bad");
@@ -817,10 +860,18 @@ fn ensure_binary(
             app,
             "downloading",
             None,
-            &format!("发现已下载的 cloudflared，正在复制到缓存目录…（{}）", found.display()),
+            &format!(
+                "发现已下载的 cloudflared，正在复制到缓存目录…（{}）",
+                found.display()
+            ),
         );
         if std::fs::copy(&found, &path).is_ok() && validate_exe(&path).is_ok() {
-            t.set(app, "starting", None, "cloudflared 已就绪（使用本机已有文件），正在建立隧道…");
+            t.set(
+                app,
+                "starting",
+                None,
+                "cloudflared 已就绪（使用本机已有文件），正在建立隧道…",
+            );
             return Ok(path);
         }
         let _ = std::fs::remove_file(&path);

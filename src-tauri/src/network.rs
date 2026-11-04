@@ -1,4 +1,4 @@
-//! 网卡探测与地址选择。与旧版 `src/main/network.js` 打分规则逐条对齐。
+﻿//! 网卡探测与地址选择。与旧版 `src/main/network.js` 打分规则逐条对齐。
 //!
 //! 关键点：Windows 上装了 Hyper-V / WSL / VMware / Tailscale / 各类 VPN 之后，
 //! 枚举出来的网卡里会多出一堆手机永远连不上的虚拟网卡。
@@ -11,9 +11,27 @@ use std::time::Duration;
 
 /// 虚拟网卡特征（命中即大幅减分）。
 const VIRTUAL_HINTS: &[&str] = &[
-    "vethernet", "vmware", "virtualbox", "vboxnet", "hyper-v", "docker", "wsl", "tailscale",
-    "zerotier", "tap-", "wintun", "wireguard", "vpn", "radmin", "hamachi", "bluetooth", "loopback",
-    "npcap", "clash", "singbox", "virtual",
+    "vethernet",
+    "vmware",
+    "virtualbox",
+    "vboxnet",
+    "hyper-v",
+    "docker",
+    "wsl",
+    "tailscale",
+    "zerotier",
+    "tap-",
+    "wintun",
+    "wireguard",
+    "vpn",
+    "radmin",
+    "hamachi",
+    "bluetooth",
+    "loopback",
+    "npcap",
+    "clash",
+    "singbox",
+    "virtual",
 ];
 const WIFI_HINTS: &[&str] = &["wi-fi", "wifi", "wlan", "wlp", "无线"];
 const ETH_HINTS: &[&str] = &["ethernet", "以太网", "本地连接"];
@@ -22,8 +40,10 @@ const ETH_HINTS: &[&str] = &["ethernet", "以太网", "本地连接"];
 pub struct Candidate {
     pub name: String,
     pub address: Ipv4Addr,
+    #[allow(dead_code)]
     pub netmask: Option<Ipv4Addr>,
     pub score: i32,
+    #[allow(dead_code)]
     pub is_default_route: bool,
     pub is_virtual: bool,
 }
@@ -34,13 +54,15 @@ pub struct Picked {
     pub address: Ipv4Addr,
     pub is_virtual: bool,
     pub fallback: bool,
+    #[allow(dead_code)]
     pub list: Vec<Candidate>,
 }
 
 /// 通过 UDP connect 拿到默认路由使用的本机地址（不会真的发包，断网时也会失败返回 None）。
 pub fn default_route_address() -> Option<Ipv4Addr> {
     let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
-    sock.set_write_timeout(Some(Duration::from_millis(200))).ok()?;
+    sock.set_write_timeout(Some(Duration::from_millis(200)))
+        .ok()?;
     // 只为了触发路由选择，不真的发数据
     if sock.connect("8.8.8.8:80").is_err() {
         return None;
@@ -239,16 +261,24 @@ pub fn connection_profiles() -> Vec<ConnectionProfile> {
                 .and_then(|x| x.as_str())
                 .unwrap_or_default()
                 .to_string(),
-            name: v.get("Name").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+            name: v
+                .get("Name")
+                .and_then(|x| x.as_str())
+                .unwrap_or_default()
+                .to_string(),
             // ConvertTo-Json 会把枚举序列化成数字：0=公用 1=专用 2=域
             network_category: v
                 .get("NetworkCategory")
-                .and_then(|x| x.as_i64().or_else(|| x.as_str().map(|s| match s {
-                    "Public" => 0,
-                    "Private" => 1,
-                    "DomainAuthenticated" => 2,
-                    _ => -1,
-                })))
+                .and_then(|x| {
+                    x.as_i64().or_else(|| {
+                        x.as_str().map(|s| match s {
+                            "Public" => 0,
+                            "Private" => 1,
+                            "DomainAuthenticated" => 2,
+                            _ => -1,
+                        })
+                    })
+                })
                 .unwrap_or(-1),
         })
         .collect()

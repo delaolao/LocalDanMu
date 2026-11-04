@@ -117,7 +117,13 @@ fn main() {
 
             // 窗口先出来，讲师有东西可看
             windows::create_control(&handle)?;
-            let display = core.settings.get().display_id.as_ref().and_then(|v| v.as_str()).map(|s| s.to_string());
+            let display = core
+                .settings
+                .get()
+                .display_id
+                .as_ref()
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             windows::create_overlay(&handle, display.as_deref())?;
             windows::spawn_cursor_watch(handle.clone());
             windows::spawn_style_guard(handle.clone());
@@ -150,7 +156,10 @@ fn main() {
 
                 // 诊断/自动化用：LDM_TUNNEL=1 时开机自动开一次隧道，
                 // 这样不依赖 GUI 点击就能验证"下载 cloudflared → 建隧道"整条链路。
-                if std::env::var("LDM_TUNNEL").map(|v| v == "1").unwrap_or(false) {
+                if std::env::var("LDM_TUNNEL")
+                    .map(|v| v == "1")
+                    .unwrap_or(false)
+                {
                     if let Some(session) = core_bg.session() {
                         let cfg = core_bg.settings.get();
                         let t = handle_bg.state::<std::sync::Arc<Tunnel>>().inner().clone();
@@ -167,14 +176,18 @@ fn main() {
                 }
                 // 网络位置探测会起一次 PowerShell，放后台
                 let core_net = Arc::clone(&core_bg);
-                tauri::async_runtime::spawn_blocking(move || core_net.refresh_network()).await.ok();
+                tauri::async_runtime::spawn_blocking(move || core_net.refresh_network())
+                    .await
+                    .ok();
                 core_bg.push_state();
 
                 // 网络变化时重算地址（IP 变了二维码要跟着变）
                 loop {
                     tokio::time::sleep(Duration::from_secs(15)).await;
                     let core_tick = Arc::clone(&core_bg);
-                    tauri::async_runtime::spawn_blocking(move || core_tick.refresh_network()).await.ok();
+                    tauri::async_runtime::spawn_blocking(move || core_tick.refresh_network())
+                        .await
+                        .ok();
                     core_bg.schedule_push();
                 }
             });
@@ -297,7 +310,13 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
 
-    *tray_refs().lock().unwrap() = Some(TrayRefs { room, pause, overlay, mode, end });
+    *tray_refs().lock().unwrap() = Some(TrayRefs {
+        room,
+        pause,
+        overlay,
+        mode,
+        end,
+    });
     Ok(())
 }
 
@@ -340,13 +359,25 @@ fn refresh_tray_labels(app: &AppHandle, core: &Arc<AppCore>) {
     let _ = refs.room.set_text(room);
 
     let paused = core.paused.load(Ordering::SeqCst);
-    let _ = refs.pause.set_text(if paused { "恢复弹幕" } else { "暂停弹幕" });
+    let _ = refs.pause.set_text(if paused {
+        "恢复弹幕"
+    } else {
+        "暂停弹幕"
+    });
 
     let visible = core.overlay_visible.load(Ordering::SeqCst);
-    let _ = refs.overlay.set_text(if visible { "隐藏弹幕层" } else { "显示弹幕层" });
+    let _ = refs.overlay.set_text(if visible {
+        "隐藏弹幕层"
+    } else {
+        "显示弹幕层"
+    });
 
     let cloud = core.settings.get().mode == "cloud";
-    let _ = refs.mode.set_text(if cloud { "切回滚动弹幕" } else { "切换到词云" });
+    let _ = refs.mode.set_text(if cloud {
+        "切回滚动弹幕"
+    } else {
+        "切换到词云"
+    });
 
     let has_session = core.session().is_some();
     let _ = refs.end.set_enabled(has_session);
@@ -368,12 +399,30 @@ fn register_shortcuts(app: &AppHandle) {
     use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
     let defs: [(Shortcut, &str); 6] = [
-        (Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space), "Ctrl+Alt+Space"),
-        (Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyX), "Ctrl+Alt+X"),
-        (Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyJ), "Ctrl+Alt+J"),
-        (Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyK), "Ctrl+Alt+K"),
-        (Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyG), "Ctrl+Alt+G"),
-        (Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyM), "Ctrl+Alt+M"),
+        (
+            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space),
+            "Ctrl+Alt+Space",
+        ),
+        (
+            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyX),
+            "Ctrl+Alt+X",
+        ),
+        (
+            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyJ),
+            "Ctrl+Alt+J",
+        ),
+        (
+            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyK),
+            "Ctrl+Alt+K",
+        ),
+        (
+            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyG),
+            "Ctrl+Alt+G",
+        ),
+        (
+            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyM),
+            "Ctrl+Alt+M",
+        ),
     ];
 
     let mut report = serde_json::Map::new();
@@ -393,7 +442,12 @@ async fn run_shortcut_action(app: &AppHandle, name: &str) {
     // `Shortcut::to_string()` 产出的是 "ctrl+alt+KeyK" 这种形式，必须先把 "key" 前缀剥掉：
     // 否则 "KeyK".to_ascii_lowercase() == "keyk"，和 "k" 永远匹配不上，
     // 表现就是"快捷键能触发但什么都不发生"（这里踩过一次，靠探针日志才看出来）。
-    let raw = name.split('+').last().unwrap_or("").trim().to_ascii_lowercase();
+    let raw = name
+        .split('+')
+        .next_back()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     let key = raw.strip_prefix("key").unwrap_or(&raw).to_string();
 
     if crate::core::probe_enabled() {
@@ -404,7 +458,10 @@ async fn run_shortcut_action(app: &AppHandle, name: &str) {
         "space" => {
             let paused = core.toggle_pause();
             if let Some(w) = app.get_webview_window(OVERLAY) {
-                let _ = w.emit("dm:cmd", json!({ "type": if paused { "pause" } else { "resume" } }));
+                let _ = w.emit(
+                    "dm:cmd",
+                    json!({ "type": if paused { "pause" } else { "resume" } }),
+                );
             }
             core.push_state();
         }
@@ -470,7 +527,13 @@ fn toggle_overlay(app: &AppHandle) {
 }
 
 fn toggle_join(app: &AppHandle, core: &Arc<AppCore>) {
-    let display = core.settings.get().display_id.as_ref().and_then(|v| v.as_str()).map(|s| s.to_string());
+    let display = core
+        .settings
+        .get()
+        .display_id
+        .as_ref()
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let visible = app
         .get_webview_window(windows::JOIN)
         .map(|w| w.is_visible().unwrap_or(false))
@@ -487,14 +550,22 @@ fn toggle_join(app: &AppHandle, core: &Arc<AppCore>) {
 }
 
 async fn toggle_mode(app: &AppHandle, core: &Arc<AppCore>) {
-    let next = if core.settings.get().mode == "cloud" { "scroll" } else { "cloud" };
+    let next = if core.settings.get().mode == "cloud" {
+        "scroll"
+    } else {
+        "cloud"
+    };
     core.settings.set(&json!({ "mode": next }));
     apply_mode(app, core).await;
 }
 
 async fn apply_mode(app: &AppHandle, core: &Arc<AppCore>) {
     let settings = core.settings.get();
-    let display = settings.display_id.as_ref().and_then(|v| v.as_str()).map(|s| s.to_string());
+    let display = settings
+        .display_id
+        .as_ref()
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     if settings.mode == "cloud" {
         // 先把弹幕层藏掉，再建/显示词云窗口。顺序反过来会有一段时间两层同时可见，
@@ -505,7 +576,10 @@ async fn apply_mode(app: &AppHandle, core: &Arc<AppCore>) {
         let _ = windows::create_cloud(app, display.as_deref());
         // 词云页需要一份历史，创建/切换后补推一次配置
         if let Some(w) = app.get_webview_window(windows::CLOUD) {
-            let _ = w.emit("dm:cmd", json!({ "type": "config", "config": settings_json(core) }));
+            let _ = w.emit(
+                "dm:cmd",
+                json!({ "type": "config", "config": settings_json(core) }),
+            );
         }
     } else {
         if let Some(w) = app.get_webview_window(windows::CLOUD) {
@@ -536,7 +610,10 @@ async fn confirm_and_end(app: &AppHandle, core: &Arc<AppCore>) {
         .message("将关闭手机端连接并清空内存中的全部消息（未导出的数据无法找回）。")
         .title("结束本次培训？")
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom("结束培训".into(), "取消".into()))
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "结束培训".into(),
+            "取消".into(),
+        ))
         .show(move |confirmed| {
             let _ = tx.send(confirmed);
         });
@@ -555,10 +632,7 @@ async fn confirm_and_end(app: &AppHandle, core: &Arc<AppCore>) {
 }
 
 fn apply_theme_background(app: &AppHandle, core: &Arc<AppCore>) {
-    let dark = match core.settings.get().theme.as_str() {
-        "light" => false,
-        _ => true,
-    };
+    let dark = core.settings.get().theme != "light";
     let color = if dark {
         tauri::window::Color(0x12, 0x14, 0x1a, 0xff)
     } else {
@@ -586,7 +660,10 @@ fn session_toggle_pause(app: AppHandle) -> Value {
     let core = core_of(&app);
     let paused = core.toggle_pause();
     if let Some(w) = app.get_webview_window(OVERLAY) {
-        let _ = w.emit("dm:cmd", json!({ "type": if paused { "pause" } else { "resume" } }));
+        let _ = w.emit(
+            "dm:cmd",
+            json!({ "type": if paused { "pause" } else { "resume" } }),
+        );
     }
     core.push_state();
     core.build_state(&app)
@@ -631,7 +708,9 @@ fn history_get(app: AppHandle) -> Value {
 fn app_copy_link(app: AppHandle) -> bool {
     use tauri_plugin_clipboard_manager::ClipboardExt;
     let core = core_of(&app);
-    let Some(session) = core.session() else { return false };
+    let Some(session) = core.session() else {
+        return false;
+    };
     app.clipboard().write_text(session.url).is_ok()
 }
 
@@ -646,7 +725,9 @@ async fn app_open_repo(app: AppHandle) -> bool {
 #[tauri::command]
 async fn app_open_network_settings(app: AppHandle) -> bool {
     use tauri_plugin_opener::OpenerExt;
-    app.opener().open_url("ms-settings:network-status", None::<&str>).is_ok()
+    app.opener()
+        .open_url("ms-settings:network-status", None::<&str>)
+        .is_ok()
 }
 
 #[tauri::command]
@@ -656,7 +737,13 @@ async fn app_set_config(app: AppHandle, patch: Value) -> Value {
     core.on_settings_changed(&patch);
 
     if patch.get("displayId").is_some() {
-        let display = core.settings.get().display_id.as_ref().and_then(|v| v.as_str()).map(|s| s.to_string());
+        let display = core
+            .settings
+            .get()
+            .display_id
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         windows::apply_display(&app, display.as_deref());
     }
     if patch.get("theme").is_some() {
@@ -666,7 +753,10 @@ async fn app_set_config(app: AppHandle, patch: Value) -> Value {
         apply_mode(&app, &core).await;
     }
     if let Some(w) = app.get_webview_window(OVERLAY) {
-        let _ = w.emit("dm:cmd", json!({ "type": "config", "config": settings_json(&core) }));
+        let _ = w.emit(
+            "dm:cmd",
+            json!({ "type": "config", "config": settings_json(&core) }),
+        );
     }
     core.push_state();
     settings_json(&core)
@@ -676,7 +766,13 @@ async fn app_set_config(app: AppHandle, patch: Value) -> Value {
 async fn app_set_display(app: AppHandle, id: String) -> Value {
     let core = core_of(&app);
     core.settings.set(&json!({ "displayId": id }));
-    let display = core.settings.get().display_id.as_ref().and_then(|v| v.as_str()).map(|s| s.to_string());
+    let display = core
+        .settings
+        .get()
+        .display_id
+        .as_ref()
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     windows::apply_display(&app, display.as_deref());
     core.push_state();
     core.build_state(&app)
@@ -687,7 +783,9 @@ async fn app_set_nic(app: AppHandle, address: Option<String>) -> Value {
     let core = core_of(&app);
     core.settings.set(&json!({ "preferredIp": address }));
     let core_bg = Arc::clone(&core);
-    tauri::async_runtime::spawn_blocking(move || core_bg.refresh_network()).await.ok();
+    tauri::async_runtime::spawn_blocking(move || core_bg.refresh_network())
+        .await
+        .ok();
     core.push_state();
     core.build_state(&app)
 }
@@ -696,7 +794,9 @@ async fn app_set_nic(app: AppHandle, address: Option<String>) -> Value {
 async fn app_refresh_network(app: AppHandle) -> Value {
     let core = core_of(&app);
     let core_bg = Arc::clone(&core);
-    tauri::async_runtime::spawn_blocking(move || core_bg.refresh_network()).await.ok();
+    tauri::async_runtime::spawn_blocking(move || core_bg.refresh_network())
+        .await
+        .ok();
     core.push_state();
     core.build_state(&app)
 }
@@ -742,15 +842,19 @@ async fn app_import_words(app: AppHandle) -> Value {
             let _ = tx.send(path);
         });
 
-    let Some(Some(picked)) = rx.await.ok() else { return Value::Null };
-    let Ok(path) = picked.into_path() else { return Value::Null };
+    let Some(Some(picked)) = rx.await.ok() else {
+        return Value::Null;
+    };
+    let Ok(path) = picked.into_path() else {
+        return Value::Null;
+    };
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return json!({ "error": "读取文件失败" });
     };
 
     let core = core_of(&app);
     let split = |s: &str| -> Vec<String> {
-        s.split(|c| matches!(c, '\r' | '\n' | ',' | '，' | '、' | ';' | '；'))
+        s.split(['\r', '\n', ',', '，', '、', ';', '；'])
             .map(|w| w.trim().to_string())
             .filter(|w| !w.is_empty())
             .collect()
@@ -783,9 +887,12 @@ async fn app_export(app: AppHandle) -> bool {
     let items = core.public_history(usize::MAX);
     if items.is_empty() {
         let (tx, _rx) = tokio::sync::oneshot::channel::<bool>();
-        app.dialog().message("还没有收到任何消息").title("导出").show(move |_| {
-            let _ = tx.send(true);
-        });
+        app.dialog()
+            .message("还没有收到任何消息")
+            .title("导出")
+            .show(move |_| {
+                let _ = tx.send(true);
+            });
         return false;
     }
 
@@ -800,8 +907,12 @@ async fn app_export(app: AppHandle) -> bool {
             let _ = tx.send(path);
         });
 
-    let Some(Some(picked)) = rx.await.ok() else { return false };
-    let Ok(path) = picked.into_path() else { return false };
+    let Some(Some(picked)) = rx.await.ok() else {
+        return false;
+    };
+    let Ok(path) = picked.into_path() else {
+        return false;
+    };
 
     let is_csv = path
         .extension()
@@ -809,7 +920,11 @@ async fn app_export(app: AppHandle) -> bool {
         .map(|e| e.eq_ignore_ascii_case("csv"))
         .unwrap_or(false);
 
-    let result = if is_csv { write_csv(&core, &path) } else { write_json(&core, &path) };
+    let result = if is_csv {
+        write_csv(&core, &path)
+    } else {
+        write_json(&core, &path)
+    };
 
     let (title, body) = match &result {
         Ok(()) => ("导出完成", path.display().to_string()),
@@ -832,7 +947,11 @@ fn write_csv(core: &Arc<AppCore>, path: &std::path::Path) -> std::io::Result<()>
         } else {
             item.payload.clone()
         };
-        let kind = if item.content_type == "image" { "图片" } else { "文字" };
+        let kind = if item.content_type == "image" {
+            "图片"
+        } else {
+            "文字"
+        };
         out.push_str(&format!(
             "{},{},{},{}\r\n",
             item.seq,
@@ -864,7 +983,10 @@ fn write_json(core: &Arc<AppCore>, path: &std::path::Path) -> std::io::Result<()
         "count": items.len(),
         "messages": items,
     });
-    std::fs::write(path, serde_json::to_string_pretty(&payload).unwrap_or_default())
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    )
 }
 
 fn csv_cell(value: &str) -> String {
@@ -964,7 +1086,10 @@ fn dm_modal(app: AppHandle, open: bool) -> bool {
 fn dm_ready(app: AppHandle) -> bool {
     let core = core_of(&app);
     if let Some(w) = app.get_webview_window(OVERLAY) {
-        let _ = w.emit("dm:cmd", json!({ "type": "config", "config": settings_json(&core) }));
+        let _ = w.emit(
+            "dm:cmd",
+            json!({ "type": "config", "config": settings_json(&core) }),
+        );
         if core.paused.load(Ordering::SeqCst) {
             let _ = w.emit("dm:cmd", json!({ "type": "pause" }));
         }
@@ -984,11 +1109,11 @@ fn tunnel_start(app: AppHandle) -> Value {
     };
     let cfg = core.settings.get();
     t.start(tunnel::StartArgs {
-            port: session.port,
-            room: session.token.clone(),
-            tunnel_token: cfg.tunnel_token.clone(),
-            host: cfg.tunnel_host.clone(),
-            cloudflared_path: Some(cfg.cloudflared_path.clone()).filter(|s| !s.trim().is_empty()),
+        port: session.port,
+        room: session.token.clone(),
+        tunnel_token: cfg.tunnel_token.clone(),
+        host: cfg.tunnel_host.clone(),
+        cloudflared_path: Some(cfg.cloudflared_path.clone()).filter(|s| !s.trim().is_empty()),
     });
     t.snapshot()
 }
@@ -1042,7 +1167,8 @@ async fn app_pick_cloudflared(app: AppHandle) -> Value {
     match tunnel::validate_exe(&path) {
         Ok(bytes) => {
             let core = core_of(&app);
-            core.settings.set(&json!({ "cloudflaredPath": path.to_string_lossy() }));
+            core.settings
+                .set(&json!({ "cloudflaredPath": path.to_string_lossy() }));
             core.push_state();
             json!({
                 "ok": true,

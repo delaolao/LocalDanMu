@@ -11,7 +11,9 @@
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
+};
 
 use crate::sys;
 
@@ -34,10 +36,18 @@ pub fn hwnd_of(app: &AppHandle, label: &str) -> Option<isize> {
 }
 
 /// 目标显示器的物理边界。找不到就回落到主屏。
-pub fn target_bounds(app: &AppHandle, display_name: Option<&str>) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
+pub fn target_bounds(
+    app: &AppHandle,
+    display_name: Option<&str>,
+) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
     let monitors = app.available_monitors().unwrap_or_default();
     let chosen = display_name
-        .and_then(|name| monitors.iter().find(|m| m.name().map(|n| n.as_str()) == Some(name)).cloned())
+        .and_then(|name| {
+            monitors
+                .iter()
+                .find(|m| m.name().map(|n| n.as_str()) == Some(name))
+                .cloned()
+        })
         .or_else(|| app.primary_monitor().ok().flatten())
         .or_else(|| monitors.first().cloned());
 
@@ -177,8 +187,12 @@ pub fn spawn_cursor_watch(app: AppHandle) {
             if !win.is_visible().unwrap_or(false) {
                 continue;
             }
-            let Ok(bounds) = win.outer_position() else { continue };
-            let Some(cursor) = sys::cursor_pos() else { continue };
+            let Ok(bounds) = win.outer_position() else {
+                continue;
+            };
+            let Some(cursor) = sys::cursor_pos() else {
+                continue;
+            };
 
             // 物理像素 → CSS 像素
             let scale = win.scale_factor().unwrap_or(1.0).max(0.1);

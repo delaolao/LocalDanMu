@@ -121,10 +121,12 @@ pub trait MessageSink: Send + Sync + 'static {
     fn on_like(&self, seq: u64, likes: u32);
     fn on_signals(&self, snap: &Signals);
     fn on_online(&self, online: usize);
+    #[allow(dead_code)]
     fn on_log(&self, kind: &str, detail: &str);
 }
 
 /// 什么都不做的 sink（测试或不关心副作用的场景）。
+#[allow(dead_code)]
 pub struct NullSink;
 
 impl MessageSink for NullSink {
@@ -144,7 +146,10 @@ struct Bucket {
 
 impl Bucket {
     fn new(tokens: f64) -> Self {
-        Bucket { tokens, last: Instant::now() }
+        Bucket {
+            tokens,
+            last: Instant::now(),
+        }
     }
 
     /// 按速率补充令牌后尝试取 1 个。
@@ -243,6 +248,7 @@ pub struct ServerState {
 }
 
 impl ServerState {
+    #[allow(dead_code)]
     pub fn online(&self) -> usize {
         self.online.load(Ordering::SeqCst)
     }
@@ -250,7 +256,11 @@ impl ServerState {
     pub fn signals(&self) -> Signals {
         let mut guard = self.lock();
         let recent = guard.recent_counts();
-        Signals { total: guard.signals_total, recent, window_ms: SIGNAL_WINDOW_MS }
+        Signals {
+            total: guard.signals_total,
+            recent,
+            window_ms: SIGNAL_WINDOW_MS,
+        }
     }
 
     pub fn live(&self) -> &Arc<LiveConfig> {
@@ -379,9 +389,16 @@ struct Validated {
 }
 
 fn validate(msg: &Value) -> Result<Validated, &'static str> {
-    match msg.get("contentType").and_then(|v| v.as_str()).unwrap_or("") {
+    match msg
+        .get("contentType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+    {
         "text" => {
-            let raw = msg.get("payload").and_then(|v| v.as_str()).ok_or("bad_request")?;
+            let raw = msg
+                .get("payload")
+                .and_then(|v| v.as_str())
+                .ok_or("bad_request")?;
             let text = clean_text(raw);
             if text.is_empty() {
                 return Err("empty");
@@ -396,14 +413,21 @@ fn validate(msg: &Value) -> Result<Validated, &'static str> {
             })
         }
         "image" => {
-            let data = msg.get("payload").and_then(|v| v.as_str()).ok_or("bad_request")?;
+            let data = msg
+                .get("payload")
+                .and_then(|v| v.as_str())
+                .ok_or("bad_request")?;
             if data.len() > IMAGE_BASE64_MAX {
                 return Err("too_large");
             }
             if !is_image_data_url(data) {
                 return Err("bad_image");
             }
-            Ok(Validated { content_type: "image", payload: data.to_string(), color: None })
+            Ok(Validated {
+                content_type: "image",
+                payload: data.to_string(),
+                color: None,
+            })
         }
         _ => Err("bad_request"),
     }
@@ -501,7 +525,11 @@ async fn join_page(State(st): State<ServerState>, Path(token): Path<String>) -> 
 async fn asset(Path(path): Path<String>) -> Response {
     let clean = path.trim_start_matches('/');
     if clean.contains("..") {
-        return respond(StatusCode::NOT_FOUND, b"Not Found".to_vec(), "text/plain; charset=utf-8");
+        return respond(
+            StatusCode::NOT_FOUND,
+            b"Not Found".to_vec(),
+            "text/plain; charset=utf-8",
+        );
     }
     serve_embedded(&format!("assets/{clean}")).await
 }
@@ -509,7 +537,9 @@ async fn asset(Path(path): Path<String>) -> Response {
 async fn healthz() -> Response {
     respond(
         StatusCode::OK,
-        json!({ "ok": true, "ts": now_ms() }).to_string().into_bytes(),
+        json!({ "ok": true, "ts": now_ms() })
+            .to_string()
+            .into_bytes(),
         "application/json; charset=utf-8",
     )
 }
@@ -540,16 +570,25 @@ async fn ws_handler(
         peer.ip()
     };
     if !timing_safe_eq(&q.t.unwrap_or_default(), &st.token) {
-        return respond(StatusCode::UNAUTHORIZED, b"Unauthorized".to_vec(), "text/plain; charset=utf-8");
+        return respond(
+            StatusCode::UNAUTHORIZED,
+            b"Unauthorized".to_vec(),
+            "text/plain; charset=utf-8",
+        );
     }
     ws.max_message_size(MAX_MESSAGE_BYTES)
-        .on_upgrade(move |socket| handle_socket(socket, st, client_ip, peer.ip().is_loopback(), enc))
+        .on_upgrade(move |socket| {
+            handle_socket(socket, st, client_ip, peer.ip().is_loopback(), enc)
+        })
 }
 
 /// 从 Cloudflare 转发头里取真实客户端 IP。
 /// 优先 `CF-Connecting-IP`，退回 `X-Forwarded-For` 的第一段。
 fn forwarded_client_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    if let Some(v) = headers.get("cf-connecting-ip").and_then(|v| v.to_str().ok()) {
+    if let Some(v) = headers
+        .get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok())
+    {
         if let Ok(ip) = v.trim().parse::<IpAddr>() {
             return Some(ip);
         }
@@ -568,6 +607,8 @@ struct Conn {
     last_like_at: Option<Instant>,
     like_timestamps: VecDeque<Instant>,
     last_react_at: Option<Instant>,
+    /// 保留：用于日志排查；目前未参与限流判断
+    #[allow(dead_code)]
     client_id: String,
 }
 
@@ -578,8 +619,8 @@ async fn send_json(socket: &mut WebSocket, payload: &Value) {
 async fn handle_socket(
     mut socket: WebSocket,
     st: ServerState,
-    ip: IpAddr,        // 限流用的「真实客户端 IP」（隧道下来自 CF-Connecting-IP）
-    loopback: bool,    // 套接字本身是不是回环（决定要不要走端到端加密，绝不能用转发头判断）
+    ip: IpAddr,     // 限流用的「真实客户端 IP」（隧道下来自 CF-Connecting-IP）
+    loopback: bool, // 套接字本身是不是回环（决定要不要走端到端加密，绝不能用转发头判断）
     wants_enc: bool,
 ) {
     let mut conn = Conn {
@@ -731,11 +772,21 @@ async fn handle_socket(
     st.sink.on_online(online);
 }
 
-async fn handle_client_text(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, raw: &str, conn: &mut Conn) {
+async fn handle_client_text(
+    socket: &mut WebSocket,
+    st: &ServerState,
+    ip: IpAddr,
+    raw: &str,
+    conn: &mut Conn,
+) {
     let Ok(msg) = serde_json::from_str::<Value>(raw) else {
-        return send_json(socket, &json!({
-            "type": "ack", "msgId": Value::Null, "status": "invalid", "reason": "json"
-        })).await;
+        return send_json(
+            socket,
+            &json!({
+                "type": "ack", "msgId": Value::Null, "status": "invalid", "reason": "json"
+            }),
+        )
+        .await;
     };
 
     match msg.get("type").and_then(|v| v.as_str()) {
@@ -743,29 +794,44 @@ async fn handle_client_text(socket: &mut WebSocket, st: &ServerState, ip: IpAddr
         Some("react") => handle_react(socket, st, conn, &msg).await,
         Some("message") => handle_message(socket, st, ip, conn, &msg).await,
         _ => {
-            send_json(socket, &json!({
-                "type": "ack", "msgId": Value::Null, "status": "invalid", "reason": "type"
-            }))
+            send_json(
+                socket,
+                &json!({
+                    "type": "ack", "msgId": Value::Null, "status": "invalid", "reason": "type"
+                }),
+            )
             .await;
         }
     }
 }
 
 async fn ack_invalid(socket: &mut WebSocket, msg_id: Option<&String>, reason: &str) {
-    send_json(socket, &json!({
-        "type": "ack", "msgId": msg_id, "status": "invalid", "reason": reason
-    }))
+    send_json(
+        socket,
+        &json!({
+            "type": "ack", "msgId": msg_id, "status": "invalid", "reason": reason
+        }),
+    )
     .await;
 }
 
 async fn ack_rate_limited(socket: &mut WebSocket, msg_id: Option<&String>, wait_ms: u64) {
-    send_json(socket, &json!({
-        "type": "ack", "msgId": msg_id, "status": "rate_limited", "retryAfter": wait_ms
-    }))
+    send_json(
+        socket,
+        &json!({
+            "type": "ack", "msgId": msg_id, "status": "rate_limited", "retryAfter": wait_ms
+        }),
+    )
     .await;
 }
 
-async fn handle_message(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, conn: &mut Conn, msg: &Value) {
+async fn handle_message(
+    socket: &mut WebSocket,
+    st: &ServerState,
+    ip: IpAddr,
+    conn: &mut Conn,
+    msg: &Value,
+) {
     let msg_id = msg
         .get("msgId")
         .and_then(|v| v.as_str())
@@ -774,9 +840,12 @@ async fn handle_message(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, co
     // 幂等：手机端重连后重发同一 msgId，不重复上屏
     if let Some(id) = &msg_id {
         if conn.msg_ids.contains(id) {
-            return send_json(socket, &json!({
-                "type": "ack", "msgId": id, "status": "ok", "duplicate": true
-            }))
+            return send_json(
+                socket,
+                &json!({
+                    "type": "ack", "msgId": id, "status": "ok", "duplicate": true
+                }),
+            )
             .await;
         }
     }
@@ -792,7 +861,10 @@ async fn handle_message(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, co
     if verified.content_type == "text" {
         let verdict = match st.filter.read() {
             Ok(guard) => guard.as_ref().map(|f| f.check(&verified.payload)),
-            Err(poisoned) => poisoned.into_inner().as_ref().map(|f| f.check(&verified.payload)),
+            Err(poisoned) => poisoned
+                .into_inner()
+                .as_ref()
+                .map(|f| f.check(&verified.payload)),
         };
         if let Some(v) = verdict {
             if v.blocked {
@@ -818,7 +890,10 @@ async fn handle_message(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, co
     // 第二道：单 IP 令牌桶 0.8 条/秒，突发 8
     let ip_wait = {
         let mut guard = st.lock();
-        let bucket = guard.ip_buckets.entry(ip).or_insert_with(|| Bucket::new(8.0));
+        let bucket = guard
+            .ip_buckets
+            .entry(ip)
+            .or_insert_with(|| Bucket::new(8.0));
         if bucket.try_take(0.8, 8.0) {
             None
         } else {
@@ -854,7 +929,13 @@ async fn handle_message(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, co
         let seq = guard.seq;
         let ts = now_ms();
 
-        guard.items_by_seq.insert(seq, ItemIndex { client_id: client_id.clone(), likes: 0 });
+        guard.items_by_seq.insert(
+            seq,
+            ItemIndex {
+                client_id: client_id.clone(),
+                likes: 0,
+            },
+        );
         guard.seq_order.push_back(seq);
         while guard.seq_order.len() > SEQ_MAX {
             if let Some(old) = guard.seq_order.pop_front() {
@@ -885,10 +966,13 @@ async fn handle_message(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, co
     };
 
     // 顺序与旧版一致：先 ack → 再广播 → 最后才通知主程序
-    send_json(socket, &json!({
-        "type": "ack", "msgId": msg_id, "status": "ok", "seq": seq,
-        "retryAfter": interval.as_millis() as u64
-    }))
+    send_json(
+        socket,
+        &json!({
+            "type": "ack", "msgId": msg_id, "status": "ok", "seq": seq,
+            "retryAfter": interval.as_millis() as u64
+        }),
+    )
     .await;
 
     st.broadcast_json(&item);
@@ -920,7 +1004,6 @@ async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, 
         .and_then(|v| v.as_str())
         .map(|s| s.chars().take(40).collect::<String>());
 
-
     let Some(seq) = seq_no else {
         return like_reject(socket, None, "gone", 0).await;
     };
@@ -946,7 +1029,9 @@ async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, 
     };
 
     let current = match outcome {
-        Outcome::Reject(reason, likes) => return like_reject(socket, Some(seq), reason, likes).await,
+        Outcome::Reject(reason, likes) => {
+            return like_reject(socket, Some(seq), reason, likes).await
+        }
         Outcome::Proceed(likes) => likes,
     };
 
@@ -960,7 +1045,8 @@ async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, 
             return like_reject(socket, Some(seq), "too_fast", current).await;
         }
     }
-    conn.like_timestamps.retain(|t| now.duration_since(*t) < Duration::from_secs(60));
+    conn.like_timestamps
+        .retain(|t| now.duration_since(*t) < Duration::from_secs(60));
     if conn.like_timestamps.len() >= LIKE_PER_MINUTE {
         return like_reject(socket, Some(seq), "too_many", current).await;
     }
@@ -968,21 +1054,22 @@ async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, 
     // 全局信号令牌桶
     let likes = {
         let mut guard = st.lock();
-        if !guard.signal_bucket.try_take(SIGNAL_GLOBAL_RATE, SIGNAL_GLOBAL_BURST) {
+        if !guard
+            .signal_bucket
+            .try_take(SIGNAL_GLOBAL_RATE, SIGNAL_GLOBAL_BURST)
+        {
             None
         } else {
             match guard.items_by_seq.get_mut(&seq) {
                 Some(item) => {
                     item.likes += 1;
                     let likes = item.likes;
-                    if let Some(brief) = guard
+                    if let Some(Value::Object(map)) = guard
                         .recent
                         .iter_mut()
                         .find(|b| b.get("seq").and_then(|v| v.as_u64()) == Some(seq))
                     {
-                        if let Value::Object(map) = brief {
-                            map.insert("likes".into(), json!(likes));
-                        }
+                        map.insert("likes".into(), json!(likes));
                     }
                     Some(likes)
                 }
@@ -1011,19 +1098,30 @@ async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, 
 async fn handle_react(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, msg: &Value) {
     let kind = msg.get("kind").and_then(|v| v.as_str()).unwrap_or("");
     if !REACT_KINDS.contains(&kind) {
-        return send_json(socket, &json!({ "type": "react-reject", "reason": "bad_kind" })).await;
+        return send_json(
+            socket,
+            &json!({ "type": "react-reject", "reason": "bad_kind" }),
+        )
+        .await;
     }
 
     let now = Instant::now();
     if let Some(last) = conn.last_react_at {
         if now.duration_since(last) < Duration::from_millis(REACT_COOLDOWN_MS) {
-            return send_json(socket, &json!({ "type": "react-reject", "reason": "too_fast" })).await;
+            return send_json(
+                socket,
+                &json!({ "type": "react-reject", "reason": "too_fast" }),
+            )
+            .await;
         }
     }
 
     let snap = {
         let mut guard = st.lock();
-        if !guard.signal_bucket.try_take(SIGNAL_GLOBAL_RATE, SIGNAL_GLOBAL_BURST) {
+        if !guard
+            .signal_bucket
+            .try_take(SIGNAL_GLOBAL_RATE, SIGNAL_GLOBAL_BURST)
+        {
             None
         } else {
             guard.signals_total.bump(kind);
@@ -1032,7 +1130,11 @@ async fn handle_react(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn,
                 guard.recent_signals.pop_front();
             }
             let recent = guard.recent_counts();
-            Some(Signals { total: guard.signals_total, recent, window_ms: SIGNAL_WINDOW_MS })
+            Some(Signals {
+                total: guard.signals_total,
+                recent,
+                window_ms: SIGNAL_WINDOW_MS,
+            })
         }
     };
 
@@ -1108,11 +1210,14 @@ impl Bridge {
 
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
         let handle = tokio::spawn(async move {
-            let _ = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-                .with_graceful_shutdown(async move {
-                    let _ = stop_rx.await;
-                })
-                .await;
+            let _ = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
+                let _ = stop_rx.await;
+            })
+            .await;
         });
 
         Ok(Bridge {
@@ -1130,7 +1235,8 @@ impl Bridge {
 
     /// 结束一场：先通知客户端，再断开，最后关服务。
     pub async fn shutdown(mut self, reason: &str) {
-        self.state.broadcast_json(&json!({ "type": "session_end", "reason": reason }));
+        self.state
+            .broadcast_json(&json!({ "type": "session_end", "reason": reason }));
         tokio::time::sleep(Duration::from_millis(60)).await;
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
@@ -1196,14 +1302,20 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert("cf-connecting-ip", "203.0.113.9".parse().unwrap());
         h.insert("x-forwarded-for", "198.51.100.1, 10.0.0.1".parse().unwrap());
-        assert_eq!(forwarded_client_ip(&h), Some("203.0.113.9".parse().unwrap()));
+        assert_eq!(
+            forwarded_client_ip(&h),
+            Some("203.0.113.9".parse().unwrap())
+        );
     }
 
     #[test]
     fn forwarded_ip_falls_back_to_xff_first_hop() {
         let mut h = HeaderMap::new();
         h.insert("x-forwarded-for", "198.51.100.7, 10.0.0.1".parse().unwrap());
-        assert_eq!(forwarded_client_ip(&h), Some("198.51.100.7".parse().unwrap()));
+        assert_eq!(
+            forwarded_client_ip(&h),
+            Some("198.51.100.7".parse().unwrap())
+        );
     }
 
     #[test]
@@ -1256,7 +1368,9 @@ mod tests {
 
     async fn connect(port: u16, token: &str) -> Ws {
         let url = format!("ws://127.0.0.1:{port}/ws?t={token}");
-        let (ws, _) = tokio_tungstenite::connect_async(url).await.expect("应当能连上");
+        let (ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .expect("应当能连上");
         ws
     }
 
@@ -1296,7 +1410,10 @@ mod tests {
         assert_ne!(a, b);
         // 去掉易混字符 0/o/1/l/i
         for c in a.chars() {
-            assert!("abcdefghjkmnpqrstuvwxyz23456789".contains(c), "出现了易混字符 {c}");
+            assert!(
+                "abcdefghjkmnpqrstuvwxyz23456789".contains(c),
+                "出现了易混字符 {c}"
+            );
         }
     }
 
@@ -1310,26 +1427,42 @@ mod tests {
 
     #[test]
     fn text_validation_matches_legacy_rules() {
-        assert_eq!(validate(&json!({ "contentType": "text", "payload": "  " })).unwrap_err(), "empty");
+        assert_eq!(
+            validate(&json!({ "contentType": "text", "payload": "  " })).unwrap_err(),
+            "empty"
+        );
         let long = "字".repeat(101);
-        assert_eq!(validate(&json!({ "contentType": "text", "payload": long })).unwrap_err(), "too_long");
-        let v = validate(&json!({ "contentType": "text", "payload": "你好\u{200B}世界", "color": "#7EE787" })).unwrap();
+        assert_eq!(
+            validate(&json!({ "contentType": "text", "payload": long })).unwrap_err(),
+            "too_long"
+        );
+        let v = validate(
+            &json!({ "contentType": "text", "payload": "你好\u{200B}世界", "color": "#7EE787" }),
+        )
+        .unwrap();
         assert_eq!(v.payload, "你好世界");
         assert_eq!(v.color.as_deref(), Some("#7ee787"), "颜色应统一小写");
         // 白名单之外的颜色应当被清成 None（大屏用默认白色）
-        let v = validate(&json!({ "contentType": "text", "payload": "hi", "color": "#333333" })).unwrap();
+        let v = validate(&json!({ "contentType": "text", "payload": "hi", "color": "#333333" }))
+            .unwrap();
         assert!(v.color.is_none());
     }
 
     #[test]
     fn image_validation_rejects_svg_and_oversize() {
         assert_eq!(
-            validate(&json!({ "contentType": "image", "payload": "data:image/svg+xml;base64,PHN2Zz4=" })).unwrap_err(),
+            validate(
+                &json!({ "contentType": "image", "payload": "data:image/svg+xml;base64,PHN2Zz4=" })
+            )
+            .unwrap_err(),
             "bad_image",
             "SVG 能塞脚本，必须拒绝"
         );
         assert_eq!(
-            validate(&json!({ "contentType": "image", "payload": "data:text/html;base64,PHN2Zz4=" })).unwrap_err(),
+            validate(
+                &json!({ "contentType": "image", "payload": "data:text/html;base64,PHN2Zz4=" })
+            )
+            .unwrap_err(),
             "bad_image"
         );
         let ok = format!("data:image/png;base64,{}", "A".repeat(64));
@@ -1354,7 +1487,9 @@ mod tests {
         assert_eq!(bad.0, 403);
         assert!(bad.1.contains("链接已失效"));
 
-        let css = client.get(&format!("{base}/assets/style.css?v=0.2.0")).await;
+        let css = client
+            .get(&format!("{base}/assets/style.css?v=0.2.0"))
+            .await;
         assert_eq!(css.0, 200, "静态资源要能被取到（带 query 也应正常）");
 
         let missing = client.get(&format!("{base}/assets/nope.js")).await;
@@ -1386,10 +1521,13 @@ mod tests {
         assert_eq!(hello["intervalSec"], 5);
         assert_eq!(hello["paused"], false);
 
-        send(&mut ws, json!({
-            "type": "message", "msgId": "m1", "contentType": "text",
-            "payload": "第一次发言", "color": "#ffe066", "clientId": "device-A"
-        }))
+        send(
+            &mut ws,
+            json!({
+                "type": "message", "msgId": "m1", "contentType": "text",
+                "payload": "第一次发言", "color": "#ffe066", "clientId": "device-A"
+            }),
+        )
         .await;
 
         let ack = read_until(&mut ws, "ack").await;
@@ -1403,10 +1541,12 @@ mod tests {
         assert_eq!(item["kind"], "text");
 
         // 主程序也应当收到了这条（含完整正文）
-        let recorded = sink.messages.lock().unwrap();
-        assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0].payload, "第一次发言");
-        assert_eq!(recorded[0].color.as_deref(), Some("#ffe066"));
+        {
+            let recorded = sink.messages.lock().unwrap();
+            assert_eq!(recorded.len(), 1);
+            assert_eq!(recorded[0].payload, "第一次发言");
+            assert_eq!(recorded[0].color.as_deref(), Some("#ffe066"));
+        }
 
         bridge.shutdown("test").await;
     }
@@ -1445,20 +1585,26 @@ mod tests {
         let mut ws = connect(bridge.port, "testtoken").await;
         read_until(&mut ws, "hello").await;
 
-        send(&mut ws, json!({
-            "type": "message", "msgId": "bad-1", "contentType": "text",
-            "payload": "加微信 abc_12345", "clientId": "device-A"
-        }))
+        send(
+            &mut ws,
+            json!({
+                "type": "message", "msgId": "bad-1", "contentType": "text",
+                "payload": "加微信 abc_12345", "clientId": "device-A"
+            }),
+        )
         .await;
         let blocked = read_until(&mut ws, "ack").await;
         assert_eq!(blocked["status"], "invalid");
         assert_eq!(blocked["reason"], "filtered");
 
         // 紧接着发正常内容：如果刚才那条占了额度，这里会被 rate_limited
-        send(&mut ws, json!({
-            "type": "message", "msgId": "good-1", "contentType": "text",
-            "payload": "换个说法", "clientId": "device-A"
-        }))
+        send(
+            &mut ws,
+            json!({
+                "type": "message", "msgId": "good-1", "contentType": "text",
+                "payload": "换个说法", "clientId": "device-A"
+            }),
+        )
         .await;
         let ok = read_until(&mut ws, "ack").await;
         assert_eq!(ok["status"], "ok", "被过滤的消息不该占用额度");
@@ -1479,7 +1625,10 @@ mod tests {
         send(&mut ws, json!({ "type": "message", "msgId": "b", "contentType": "text", "payload": "二", "clientId": "d1" })).await;
         let limited = read_until(&mut ws, "ack").await;
         assert_eq!(limited["status"], "rate_limited");
-        assert!(limited["retryAfter"].as_u64().unwrap() > 0, "应当告诉手机还剩多久");
+        assert!(
+            limited["retryAfter"].as_u64().unwrap() > 0,
+            "应当告诉手机还剩多久"
+        );
 
         bridge.shutdown("test").await;
     }
@@ -1512,7 +1661,11 @@ mod tests {
         let dup = read_until(&mut b, "like-reject").await;
         assert_eq!(dup["reason"], "duplicate");
 
-        assert_eq!(sink.likes.lock().unwrap().len(), 1, "主程序只该收到一次点赞回调");
+        assert_eq!(
+            sink.likes.lock().unwrap().len(),
+            1,
+            "主程序只该收到一次点赞回调"
+        );
 
         bridge.shutdown("test").await;
     }
@@ -1552,7 +1705,9 @@ mod tests {
 
         // 讲师暂停：应当广播给所有观众
         bridge.state.live().set_paused(true);
-        bridge.state.broadcast_json(&json!({ "type": "paused", "paused": true }));
+        bridge
+            .state
+            .broadcast_json(&json!({ "type": "paused", "paused": true }));
 
         let got_a = read_until(&mut a, "paused").await;
         let got_b = read_until(&mut b, "paused").await;
@@ -1598,8 +1753,12 @@ mod tests {
                     Some(i) => (&without_scheme[..i], &without_scheme[i..]),
                     None => (without_scheme, "/"),
                 };
-                let mut stream = tokio::net::TcpStream::connect(host_port).await.expect("连不上");
-                let req = format!("GET {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\n\r\n");
+                let mut stream = tokio::net::TcpStream::connect(host_port)
+                    .await
+                    .expect("连不上");
+                let req = format!(
+                    "GET {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\n\r\n"
+                );
                 stream.write_all(req.as_bytes()).await.expect("写失败");
                 let mut buf = Vec::new();
                 stream.read_to_end(&mut buf).await.ok();
