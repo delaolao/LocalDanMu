@@ -181,6 +181,8 @@ struct ItemIndex {
 struct Inner {
     seq: u64,
     ip_buckets: HashMap<IpAddr, Bucket>,
+    /// 按 IP 保存的发送状态（冷却、msgId、点赞去重）
+    clients: HashMap<IpAddr, ClientState>,
     global_bucket: Bucket,
     signal_bucket: Bucket,
     items_by_seq: HashMap<u64, ItemIndex>,
@@ -592,17 +594,20 @@ fn forwarded_client_ip(headers: &HeaderMap) -> Option<IpAddr> {
     v.trim().parse::<IpAddr>().ok()
 }
 
-/// 每条连接自己的会话状态（不共享、不过锁）。
-struct Conn {
+/// 单个客户端（按真实 IP 区分）的发送状态。
+///
+/// 以前这些挂在每条 WebSocket 连接上，断线重连就能绕过"每人 5 秒一条"、
+/// msgId 幂等和点赞去重。现在按 IP 保存，重连不再清零。
+#[derive(Default)]
+struct ClientState {
     last_sent_at: Option<Instant>,
     msg_ids: VecDeque<String>,
     liked_seqs: HashSet<u64>,
     last_like_at: Option<Instant>,
     like_timestamps: VecDeque<Instant>,
     last_react_at: Option<Instant>,
-    /// 保留：用于日志排查；目前未参与限流判断
-    #[allow(dead_code)]
-    client_id: String,
+    /// 最后一次活动时间，用于淘汰长期不用的条目
+    last_seen: Option<Instant>,
 }
 
 async fn send_json(socket: &mut WebSocket, payload: &Value) {
@@ -616,16 +621,6 @@ async fn handle_socket(
     loopback: bool, // 套接字本身是不是回环（决定要不要走端到端加密，绝不能用转发头判断）
     wants_enc: bool,
 ) {
-    let mut conn = Conn {
-        last_sent_at: None,
-        msg_ids: VecDeque::new(),
-        liked_seqs: HashSet::new(),
-        last_like_at: None,
-        like_timestamps: VecDeque::new(),
-        last_react_at: None,
-        client_id: random_token(10),
-    };
-
     // 只有隧道转发进来的连接（对端是回环地址）才启用端到端加密。
     // 局域网连接保持明文：零开销，且不改变原有协议。
     //
@@ -721,7 +716,7 @@ async fn handle_socket(
                             },
                             None => text.to_string(),
                         };
-                        handle_client_text(&mut socket, &st, ip, plain.as_str(), &mut conn).await;
+                        handle_client_text(&mut socket, &st, ip, plain.as_str()).await;
                     }
                     Message::Binary(_) => {
                         send_json(&mut socket, &json!({
@@ -765,13 +760,29 @@ async fn handle_socket(
     st.sink.on_online(online);
 }
 
-async fn handle_client_text(
-    socket: &mut WebSocket,
-    st: &ServerState,
-    ip: IpAddr,
-    raw: &str,
-    conn: &mut Conn,
-) {
+/// 取（必要时创建）某个 IP 的状态。调用方必须已经持有 `st.lock()`。
+fn client_of(inner: &mut Inner, ip: IpAddr) -> &mut ClientState {
+    let now = Instant::now();
+    let entry = inner.clients.entry(ip).or_default();
+    entry.last_seen = Some(now);
+    entry
+}
+
+/// 顺手清掉长期不活跃的条目，避免长期运行后无限增长。
+fn prune_clients(inner: &mut Inner) {
+    const IDLE_LIMIT: Duration = Duration::from_secs(6 * 3600);
+    if inner.clients.len() < 512 {
+        return;
+    }
+    let now = Instant::now();
+    inner.clients.retain(|_, c| {
+        c.last_seen
+            .map(|t| now.duration_since(t) < IDLE_LIMIT)
+            .unwrap_or(false)
+    });
+}
+
+async fn handle_client_text(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, raw: &str) {
     let Ok(msg) = serde_json::from_str::<Value>(raw) else {
         return send_json(
             socket,
@@ -783,9 +794,9 @@ async fn handle_client_text(
     };
 
     match msg.get("type").and_then(|v| v.as_str()) {
-        Some("like") => handle_like(socket, st, conn, &msg).await,
-        Some("react") => handle_react(socket, st, conn, &msg).await,
-        Some("message") => handle_message(socket, st, ip, conn, &msg).await,
+        Some("like") => handle_like(socket, st, ip, &msg).await,
+        Some("react") => handle_react(socket, st, ip, &msg).await,
+        Some("message") => handle_message(socket, st, ip, &msg).await,
         _ => {
             send_json(
                 socket,
@@ -818,13 +829,7 @@ async fn ack_rate_limited(socket: &mut WebSocket, msg_id: Option<&String>, wait_
     .await;
 }
 
-async fn handle_message(
-    socket: &mut WebSocket,
-    st: &ServerState,
-    ip: IpAddr,
-    conn: &mut Conn,
-    msg: &Value,
-) {
+async fn handle_message(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, msg: &Value) {
     let msg_id = msg
         .get("msgId")
         .and_then(|v| v.as_str())
@@ -832,7 +837,13 @@ async fn handle_message(
 
     // 幂等：手机端重连后重发同一 msgId，不重复上屏
     if let Some(id) = &msg_id {
-        if conn.msg_ids.contains(id) {
+        let dup = st
+            .lock()
+            .clients
+            .get(&ip)
+            .map(|c| c.msg_ids.contains(id))
+            .unwrap_or(false);
+        if dup {
             return send_json(
                 socket,
                 &json!({
@@ -872,7 +883,8 @@ async fn handle_message(
     let interval = Duration::from_secs(st.live.interval_sec() as u64);
     let now = Instant::now();
 
-    if let Some(last) = conn.last_sent_at {
+    let last_sent = st.lock().clients.get(&ip).and_then(|c| c.last_sent_at);
+    if let Some(last) = last_sent {
         let elapsed = now.duration_since(last);
         if elapsed < interval {
             let wait = (interval - elapsed).as_millis() as u64;
@@ -903,11 +915,16 @@ async fn handle_message(
         return ack_rate_limited(socket, msg_id.as_ref(), 1200).await;
     }
 
-    conn.last_sent_at = Some(now);
-    if let Some(id) = &msg_id {
-        conn.msg_ids.push_back(id.clone());
-        while conn.msg_ids.len() > MSG_ID_MAX {
-            conn.msg_ids.pop_front();
+    {
+        let mut guard = st.lock();
+        prune_clients(&mut guard);
+        let entry = client_of(&mut guard, ip);
+        entry.last_sent_at = Some(now);
+        if let Some(id) = &msg_id {
+            entry.msg_ids.push_back(id.clone());
+            while entry.msg_ids.len() > MSG_ID_MAX {
+                entry.msg_ids.pop_front();
+            }
         }
     }
 
@@ -990,7 +1007,7 @@ async fn like_reject(socket: &mut WebSocket, seq: Option<u64>, reason: &str, lik
     )
     .await;
 }
-async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, msg: &Value) {
+async fn handle_like(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, msg: &Value) {
     let seq_no = msg.get("seq").and_then(|v| v.as_u64());
     let client_id = msg
         .get("clientId")
@@ -1028,20 +1045,32 @@ async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, 
         Outcome::Proceed(likes) => likes,
     };
 
-    if conn.liked_seqs.contains(&seq) {
-        return like_reject(socket, Some(seq), "duplicate", current).await;
-    }
-
     let now = Instant::now();
-    if let Some(last) = conn.last_like_at {
-        if now.duration_since(last) < Duration::from_millis(LIKE_COOLDOWN_MS) {
-            return like_reject(socket, Some(seq), "too_fast", current).await;
+    // 同步段里做完判断，别把 MutexGuard 带进下面的 await
+    let earlier = {
+        let mut guard = st.lock();
+        let entry = client_of(&mut guard, ip);
+        if entry.liked_seqs.contains(&seq) {
+            Some("duplicate")
+        } else if entry
+            .last_like_at
+            .map(|last| now.duration_since(last) < Duration::from_millis(LIKE_COOLDOWN_MS))
+            .unwrap_or(false)
+        {
+            Some("too_fast")
+        } else {
+            entry
+                .like_timestamps
+                .retain(|t| now.duration_since(*t) < Duration::from_secs(60));
+            if entry.like_timestamps.len() >= LIKE_PER_MINUTE {
+                Some("too_many")
+            } else {
+                None
+            }
         }
-    }
-    conn.like_timestamps
-        .retain(|t| now.duration_since(*t) < Duration::from_secs(60));
-    if conn.like_timestamps.len() >= LIKE_PER_MINUTE {
-        return like_reject(socket, Some(seq), "too_many", current).await;
+    };
+    if let Some(reason) = earlier {
+        return like_reject(socket, Some(seq), reason, current).await;
     }
 
     // 全局信号令牌桶
@@ -1075,12 +1104,16 @@ async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, 
         return like_reject(socket, Some(seq), "busy", current).await;
     };
 
-    conn.last_like_at = Some(now);
-    conn.like_timestamps.push_back(now);
-    conn.liked_seqs.insert(seq);
-    if conn.liked_seqs.len() > LIKED_SEQ_MAX {
-        if let Some(old) = conn.liked_seqs.iter().next().copied() {
-            conn.liked_seqs.remove(&old);
+    {
+        let mut guard = st.lock();
+        let entry = client_of(&mut guard, ip);
+        entry.last_like_at = Some(now);
+        entry.like_timestamps.push_back(now);
+        entry.liked_seqs.insert(seq);
+        if entry.liked_seqs.len() > LIKED_SEQ_MAX {
+            if let Some(old) = entry.liked_seqs.iter().next().copied() {
+                entry.liked_seqs.remove(&old);
+            }
         }
     }
 
@@ -1088,7 +1121,7 @@ async fn handle_like(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, 
     st.sink.on_like(seq, likes);
 }
 
-async fn handle_react(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn, msg: &Value) {
+async fn handle_react(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, msg: &Value) {
     let kind = msg.get("kind").and_then(|v| v.as_str()).unwrap_or("");
     if !REACT_KINDS.contains(&kind) {
         return send_json(
@@ -1099,7 +1132,8 @@ async fn handle_react(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn,
     }
 
     let now = Instant::now();
-    if let Some(last) = conn.last_react_at {
+    let last_react = st.lock().clients.get(&ip).and_then(|c| c.last_react_at);
+    if let Some(last) = last_react {
         if now.duration_since(last) < Duration::from_millis(REACT_COOLDOWN_MS) {
             return send_json(
                 socket,
@@ -1135,7 +1169,7 @@ async fn handle_react(socket: &mut WebSocket, st: &ServerState, conn: &mut Conn,
         return send_json(socket, &json!({ "type": "react-reject", "reason": "busy" })).await;
     };
 
-    conn.last_react_at = Some(now);
+    client_of(&mut st.lock(), ip).last_react_at = Some(now);
     st.broadcast_json(&json!({ "type": "react", "kind": kind, "signals": snap }));
     st.sink.on_signals(&snap);
 }
@@ -1167,6 +1201,7 @@ impl Bridge {
         let inner = Arc::new(Mutex::new(Inner {
             seq: 0,
             ip_buckets: HashMap::new(),
+            clients: HashMap::new(),
             global_bucket: Bucket::new(12.0),
             signal_bucket: Bucket::new(SIGNAL_GLOBAL_BURST),
             items_by_seq: HashMap::new(),
@@ -1565,6 +1600,68 @@ mod tests {
         assert!(second.get("seq").is_none(), "重复消息不应再分配 seq");
 
         assert_eq!(sink.messages.lock().unwrap().len(), 1, "只该入历史一次");
+        bridge.shutdown("test").await;
+    }
+
+    #[tokio::test]
+    async fn cooldown_survives_reconnect() {
+        // 以前"每人每 5 秒一条"是挂在连接上的，断线重连就能绕过。
+        // 现在按 IP 保存，新连接也要继续等。
+        let (bridge, sink) = start_test_bridge().await;
+
+        let mut ws1 = connect(bridge.port, "testtoken").await;
+        read_until(&mut ws1, "hello").await;
+        send(
+            &mut ws1,
+            json!({
+                "type": "message", "msgId": "a-1", "contentType": "text",
+                "payload": "第一条", "clientId": "device-A"
+            }),
+        )
+        .await;
+        let ack = read_until(&mut ws1, "ack").await;
+        assert_eq!(ack["status"], "ok");
+        drop(ws1);
+
+        // 换一条连接（同一个 IP），立刻再发
+        let mut ws2 = connect(bridge.port, "testtoken").await;
+        read_until(&mut ws2, "hello").await;
+        send(
+            &mut ws2,
+            json!({
+                "type": "message", "msgId": "a-2", "contentType": "text",
+                "payload": "第二条", "clientId": "device-A"
+            }),
+        )
+        .await;
+        let ack2 = read_until(&mut ws2, "ack").await;
+        assert_eq!(ack2["status"], "rate_limited", "重连不应绕过冷却");
+
+        assert_eq!(sink.messages.lock().unwrap().len(), 1, "只该入库一条");
+        bridge.shutdown("test").await;
+    }
+
+    #[tokio::test]
+    async fn duplicate_msgid_survives_reconnect() {
+        let (bridge, sink) = start_test_bridge().await;
+        let payload = json!({
+            "type": "message", "msgId": "dup-cross", "contentType": "text",
+            "payload": "只该上屏一次", "clientId": "device-A"
+        });
+
+        let mut ws1 = connect(bridge.port, "testtoken").await;
+        read_until(&mut ws1, "hello").await;
+        send(&mut ws1, payload.clone()).await;
+        assert_eq!(read_until(&mut ws1, "ack").await["status"], "ok");
+        drop(ws1);
+
+        let mut ws2 = connect(bridge.port, "testtoken").await;
+        read_until(&mut ws2, "hello").await;
+        send(&mut ws2, payload).await;
+        let ack = read_until(&mut ws2, "ack").await;
+        assert_eq!(ack["duplicate"], true, "跨连接也要认出重复 msgId");
+
+        assert_eq!(sink.messages.lock().unwrap().len(), 1);
         bridge.shutdown("test").await;
     }
 
