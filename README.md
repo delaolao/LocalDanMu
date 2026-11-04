@@ -9,6 +9,8 @@
 - **不怕网络差**：场地 WiFi 靠不住时，开启远程模式，学员用手机流量也能进（见下文「现场排障 · 9」）。
 - **两种看法**：滚动弹幕看单条，词云看比例；错过的可以回看、可以重播。
 - **有护栏**：手机号/广告/脏话默认拦截，可自定义词表或导入。
+- **可分发给别人**：每个讲师一条独立固定隧道（各自域名、各自令牌），互不影响；
+  详见 [第三点五节](#三点五给别人用多讲师开通tenant)。
 
 只支持 Windows 10/11 x64。
 
@@ -177,6 +179,82 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-win.ps1
 
 ---
 
+## 三点五、给别人用：多讲师开通（TENANT）
+
+> 这一节是给**分发者**看的。普通讲师只用上一节就够了。
+
+固定域名需要「Cloudflare 账号 + 域名」，绝大多数讲师不会自己折腾。
+如果你要把软件发给别人，**不要把你自己那条隧道的令牌发出去**——那等于把你的账号凭证分发给所有人，
+而且同一条隧道挂多个连接器时，Cloudflare 会把学员轮询分到别人的电脑上。
+
+正确做法是**每人一条独立隧道**：
+
+```
+你的 Cloudflare 账号
+├─ localdanmu     → dm.teachergeng.space        你自己
+├─ ldm-user-a1b2  → zhangsan.teachergeng.space  张三
+└─ ldm-user-c3d4  → lisi.teachergeng.space      李四
+```
+
+### 一次性准备
+
+到 Cloudflare → 我的个人资料 → **API 令牌** → 创建自定义令牌：
+
+| 类型 | 权限 |
+| --- | --- |
+| 账户 | Cloudflare Tunnel → **编辑** |
+| 区域 | DNS → **编辑**、区域 → **读取** |
+
+区域资源限定到你的域名（如 `teachergeng.space`）即可。
+
+> 别把**隧道令牌**（`eyJhIjoi...`）当成 API 令牌。API 令牌是 40 位随机串，只在开通/吊销时用。
+
+### 开通
+
+```powershell
+cd D:\teachergeng\LocalDanMu
+$env:CF_API_TOKEN = "你的 API 令牌"
+
+# 先确认令牌能用（不建任何东西）
+node tools/tenant/provision.js --label x --check
+
+# 正式开通
+node tools/tenant/provision.js --label "张三-2026春季" --host zhangsan
+```
+
+会打印两行，**私聊发给对方**：
+
+```
+公开域名 : zhangsan.teachergeng.space
+隧道令牌 : eyJhIjoi...
+```
+
+对方填进「设置与网络 → 固定隧道」，点开启即可。
+
+### 查看与吊销
+
+```powershell
+node tools/tenant/revoke.js --list                      # 看都开了谁
+node tools/tenant/revoke.js --label "张三-2026春季"      # 吊销（删 DNS + 删隧道）
+```
+
+吊销只影响那一个人，**他手里的令牌立即失效**，不影响其他人。
+
+### 三个必须知道的约束
+
+1. **子域只能一级**：Cloudflare 免费版证书只覆盖 `*.teachergeng.space`，
+   `xx.dm.teachergeng.space` 这种二级域名会 TLS 握手失败。想要 `dm.` 前缀得买
+   Advanced Certificate Manager（约 $10/月），或者用 `dm-zhangsan.teachergeng.space` 这种一级命名。
+2. **令牌不落盘**：`tools/tenant/tenants.json` 只记 label/hostname/tunnelId，**不存令牌**；
+   令牌只在开通时打印一次，补发要去控制台那条隧道详情页复制。该文件已 gitignore。
+3. **隐私边界**：流量走你的 Cloudflare 账号，你能看到元数据（时间、条数、长度），
+   **看不到内容**（程序强制端到端加密）。宣传时可以把它当卖点讲清楚。
+
+操作细节见 [tools/tenant/README.md](tools/tenant/README.md)，长期规划见
+[docs/topic-tenant.md](docs/topic-tenant.md)。
+
+---
+
 ## 四、实现要点（简版，详见架构文档）
 
 - **单端口**：HTTP 与 WebSocket 共用一个端口，二维码里只有一个地址。
@@ -193,6 +271,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-win.ps1
 ---
 
 ## 五、目录结构
+
+> 分发者用的开通脚本在 `tools/tenant/`（见第三点五节），不影响程序本身。
 
 ```
 src-tauri/src/     Rust 侧：main / core / server / windows / sys / filter / network / qr / settings
