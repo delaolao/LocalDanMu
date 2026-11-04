@@ -13,14 +13,23 @@
 const API = process.env.CF_API_BASE || 'https://api.cloudflare.com/client/v4';
 
 function token() {
-  const t = process.env.CF_API_TOKEN;
-  if (!t || !t.trim()) {
+  const t = (process.env.CF_API_TOKEN || '').trim();
+  if (!t) {
     throw new Error(
       '缺少 CF_API_TOKEN。请到 Cloudflare 控制台 → 我的个人资料 → API 令牌 创建一个，' +
         '权限至少包含：Cloudflare Tunnel: Edit、DNS: Edit、Zone: Read'
     );
   }
-  return t.trim();
+  // 最常见的错：把隧道令牌（eyJ... JWT）当成 API 令牌
+  if (t.startsWith('eyJ')) {
+    throw new Error(
+      'CF_API_TOKEN 填的是「隧道令牌」，不是 API 令牌。\n' +
+        '  隧道令牌（eyJ...）用于程序连隧道；调用 API 需要另一种令牌：\n' +
+        '  Cloudflare → 我的个人资料 → API 令牌 → 创建令牌（自定义），\n' +
+        '  权限：Account → Cloudflare Tunnel: Edit；Zone → DNS: Edit、Zone: Read。'
+    );
+  }
+  return t;
 }
 
 async function call(method, path, body) {

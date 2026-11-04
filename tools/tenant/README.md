@@ -1,4 +1,4 @@
-# TENANT：给多个讲师开通固定隧道
+﻿# TENANT：给多个讲师开通固定隧道
 
 对应议题 [docs/topic-tenant.md](../../docs/topic-tenant.md)。
 核心思路：**不是共享一条隧道，而是每人一条**。作者的 Cloudflare 账号下为每个用户建独立隧道，
@@ -15,6 +15,9 @@
 
    资源范围：包含你的账号和 `teachergeng.space`（或你的域名）。
 
+> **别把隧道令牌当 API 令牌。** 隧道令牌长得像 `eyJhIjoi...`，那是给程序连隧道用的；
+> API 令牌是 40 位随机串。填错时脚本会直接提示。
+
 2. 设置环境变量（当前 PowerShell 会话有效）：
 
    ```powershell
@@ -26,6 +29,8 @@
 > API 令牌只在开通/吊销时用，不进程序、不分发给用户。
 
 ## 开通一个用户
+
+**在仓库根目录**执行（或在 `tools/tenant` 目录里写 `node provision.js`）：
 
 ```powershell
 node tools/tenant/provision.js --label "张三-2026春季" --host u7f3k2
