@@ -52,7 +52,8 @@ function randomSuffix(len = 6) {
   const label = arg('label');
   if (!label) {
     console.error('用法: node tools/tenant/provision.js --label <标识> [--host <子域>] [--dry-run] [--check]');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   const zoneName = process.env.CF_ZONE_NAME || 'teachergeng.space';
   const sub = arg('host') || `u${randomSuffix()}`;
@@ -71,18 +72,19 @@ function randomSuffix(len = 6) {
     return;
   }
 
+  // 先解析 zone：它里面带 account.id，是细粒度令牌拿到账号 ID 的主要途径
+  const zone = await cf.resolveZone(zoneName);
+  const accountId = await cf.resolveAccountId(process.env.CF_ACCOUNT_ID, zone.accountId);
+  const zoneId = zone.id;
+
   if (checkOnly) {
-    const accountId = await cf.resolveAccountId(process.env.CF_ACCOUNT_ID);
     console.log('\n令牌有效，能读到以下资源：');
     console.log(`  account : ${accountId}`);
-    const zoneId = await cf.resolveZoneId(zoneName);
     console.log(`  zone    : ${zoneId} (${zoneName})`);
     console.log('\n可以去掉 --check 正式开通了。');
     return;
   }
 
-  const accountId = await cf.resolveAccountId(process.env.CF_ACCOUNT_ID);
-  const zoneId = await cf.resolveZoneId(zoneName);
   console.log(`account   : ${accountId}`);
   console.log(`zone      : ${zoneId}`);
 
@@ -125,5 +127,7 @@ function randomSuffix(len = 6) {
   console.log(`\n已记录到 ${STORE}`);
 })().catch((e) => {
   console.error('\n失败:', e.message);
-  process.exit(1);
+  // 用 exitCode 而不是 exit()：后者在 Node 25 + undici 下会在 Windows 上
+  // 触发 libuv 断言（UV_HANDLE_CLOSING），看着像程序崩了
+  process.exitCode = 1;
 });

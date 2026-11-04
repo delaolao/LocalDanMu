@@ -18,6 +18,10 @@
 > **别把隧道令牌当 API 令牌。** 隧道令牌长得像 `eyJhIjoi...`，那是给程序连隧道用的；
 > API 令牌是 40 位随机串。填错时脚本会直接提示。
 
+> **账号 ID 从哪来？** 细粒度令牌调 `/accounts` 会返回空（列出账号需要额外的账号级权限），
+> 所以脚本改成从 `GET /zones` 的返回里读 `account.id`。万一还是取不到，
+> 可以显式设置 `CF_ACCOUNT_ID`（控制台地址栏 `dash.cloudflare.com/<账号ID>/...` 那段）。
+
 2. 设置环境变量（当前 PowerShell 会话有效）：
 
    ```powershell

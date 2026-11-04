@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * TENANT：吊销一个用户的固定隧道。
  *
@@ -87,5 +87,5 @@ function saveStore(store) {
   console.log('\n完成。对方手里的令牌已失效。');
 })().catch((e) => {
   console.error('\n失败:', e.message);
-  process.exit(1);
+  process.exitCode = 1;
 });

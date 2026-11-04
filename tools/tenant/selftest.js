@@ -37,8 +37,10 @@ const server = http.createServer((req, res) => {
     const ok = (result) => send(200, { success: true, result });
     const u = req.url.split('?')[0];
 
-    if (u === '/accounts' && req.method === 'GET') return ok([{ id: ACCOUNT, name: 'test' }]);
-    if (u === '/zones' && req.method === 'GET') return ok([{ id: ZONE, name: 'teachergeng.space' }]);
+    // 故意返回空：细粒度令牌本来就列不出账号，逼脚本走 zone.account.id 的回退\n    if (u === '/accounts' && req.method === 'GET') return ok([]);
+    if (u === '/zones' && req.method === 'GET') {
+      return ok([{ id: ZONE, name: 'teachergeng.space', account: { id: ACCOUNT } }]);
+    }
     if (u.endsWith('/cfd_tunnel') && req.method === 'POST') {
       return ok({ id: TUNNEL_ID, name: JSON.parse(body).name });
     }

@@ -57,23 +57,39 @@ async function call(method, path, body) {
   return json.result;
 }
 
-/** 取第一个账号 ID（个人账号通常只有一个） */
-async function resolveAccountId(explicit) {
-  if (explicit) return explicit;
-  const accounts = await call('GET', '/accounts');
-  if (!Array.isArray(accounts) || accounts.length === 0) {
-    throw new Error('这个 API Token 看不到任何账号，检查权限是否包含 Account 级别');
-  }
-  return accounts[0].id;
-}
-
-/** 按域名取 zone ID */
-async function resolveZoneId(zoneName) {
+/**
+ * 按域名取 zone。
+ *
+ * 返回值里带 accountId —— 这是拿到账号 ID 的**主要途径**：
+ * 细粒度令牌（只给了 Zone:Read + DNS:Edit + Tunnel:Edit）调 `GET /accounts`
+ * 会返回空数组，因为"列出账号"需要额外的账号级权限。而 zone 对象里的 account.id
+ * 是随 zone 一起返回的，不需要那个权限。
+ */
+async function resolveZone(zoneName) {
   const zones = await call('GET', `/zones?name=${encodeURIComponent(zoneName)}`);
   if (!Array.isArray(zones) || zones.length === 0) {
-    throw new Error(`找不到域名 ${zoneName}（确认它在这个账号下，且 Token 有 Zone:Read）`);
+    throw new Error(
+      `找不到域名 ${zoneName}。确认：1) 域名在这个账号下 2) 令牌的"区域资源"包含它 3) 有 Zone:Read`
+    );
   }
-  return zones[0].id;
+  const z = zones[0];
+  return { id: z.id, accountId: z.account && z.account.id ? z.account.id : undefined };
+}
+
+async function resolveZoneId(zoneName) {
+  const z = await resolveZone(zoneName);
+  return z.id;
+}
+
+/** 取账号 ID：显式指定 > 从 zone 反查 > /accounts（可能为空） */
+async function resolveAccountId(explicit, zoneAccountId) {
+  if (explicit) return explicit;
+  if (zoneAccountId) return zoneAccountId;
+  const accounts = await call('GET', '/accounts');
+  if (Array.isArray(accounts) && accounts.length > 0) return accounts[0].id;
+  throw new Error(
+    '拿不到账号 ID。可以设置环境变量 CF_ACCOUNT_ID（控制台地址栏里 dash.cloudflare.com/<账号ID>/... 那段）'
+  );
 }
 
 /** 创建一条 remotely-managed 隧道，返回 { id, token } */
@@ -124,6 +140,7 @@ async function deleteTunnel(accountId, tunnelId) {
 
 module.exports = {
   resolveAccountId,
+  resolveZone,
   resolveZoneId,
   createTunnel,
   setIngress,
