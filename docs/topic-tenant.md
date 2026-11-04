@@ -67,6 +67,12 @@
 
 操作手册见 [tools/tenant/README.md](../tools/tenant/README.md)。
 
+## 已知约束
+
+**子域只能一级**：Cloudflare 免费版 Universal SSL 覆盖 `*.zone`，不覆盖 `*.dm.zone`。
+所以租户地址是 `syklong.teachergeng.space`，不是 `syklong.dm.teachergeng.space`
+（后者 TLS 直接失败）。需要二级前缀就得买 Advanced Certificate Manager。
+
 ## 重要前提
 
 端到端加密已经让作者看不到消息正文，只剩元数据（时间、条数、长度）。

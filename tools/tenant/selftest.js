@@ -105,7 +105,7 @@ function run(script, args) {
   );
   check(
     '入口规则主机名正确',
-    Boolean(ingress) && ingress.body.config.ingress[0].hostname === 'u7f3k2.dm.teachergeng.space'
+    Boolean(ingress) && ingress.body.config.ingress[0].hostname === 'u7f3k2.teachergeng.space'
   );
   const dns = hits.find((h) => h.method === 'POST' && h.url.endsWith('/dns_records'));
   check('DNS 是 CNAME 指向 cfargotunnel', Boolean(dns) && dns.body.type === 'CNAME' && dns.body.content === `${TUNNEL_ID}.cfargotunnel.com`);
@@ -113,7 +113,7 @@ function run(script, args) {
 
   const store = JSON.parse(fs.readFileSync(STORE, 'utf8'));
   check('tenants.json 记录了一条', store.tenants.length === 1);
-  check('记录了 hostname', store.tenants[0].hostname === 'u7f3k2.dm.teachergeng.space');
+  check('记录了 hostname', store.tenants[0].hostname === 'u7f3k2.teachergeng.space');
   check('记录了 tunnelId', store.tenants[0].tunnelId === TUNNEL_ID);
   check('没有把令牌写进文件', !JSON.stringify(store).includes('fake-tunnel-token'));
 

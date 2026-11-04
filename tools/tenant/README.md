@@ -41,7 +41,11 @@ node tools/tenant/provision.js --label "张三-2026春季" --host u7f3k2
 ```
 
 - `--label`：内部标识，写进 `tenants.json`
-- `--host`：可选，省略时自动生成 `u<随机6位>`；子域最终是 `u7f3k2.dm.teachergeng.space`
+- `--host`：可选，省略时自动生成 `u<随机6位>`；子域最终是 `u7f3k2.teachergeng.space`
+
+> **只支持一级子域。** Cloudflare 免费版 Universal SSL 只覆盖 `*.teachergeng.space`，
+> 像 `xxx.dm.teachergeng.space` 这种二级域名没有证书，TLS 会直接握手失败。
+> 想用 `dm.` 分组前缀，需要 Advanced Certificate Manager（约 $10/月）签发 `*.dm.teachergeng.space`。
 - `--dry-run`：只打印将要做的事，不调 API
 - `--check`：只验证 API 令牌与账号/zone 解析，不建任何东西
 

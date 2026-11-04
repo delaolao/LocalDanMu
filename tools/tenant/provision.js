@@ -57,7 +57,10 @@ function randomSuffix(len = 6) {
   }
   const zoneName = process.env.CF_ZONE_NAME || 'teachergeng.space';
   const sub = arg('host') || `u${randomSuffix()}`;
-  const hostname = sub.includes('.') ? sub : `${sub}.dm.${zoneName}`;
+  // 默认放一级子域：Cloudflare 免费版 Universal SSL 只覆盖 `*.zone`，
+  // 像 `xxx.dm.zone` 这种二级域名没有证书，TLS 直接握手失败。
+  // 想要分组前缀，得买 Advanced Certificate Manager 签发 `*.dm.zone`。
+  const hostname = sub.includes('.') ? sub : `${sub}.${zoneName}`;
   const dryRun = has('dry-run');
   const checkOnly = has('check');
 
@@ -89,7 +92,12 @@ function randomSuffix(len = 6) {
   console.log(`zone      : ${zoneId}`);
 
   // 中文名会被过滤成空串，退回 "user" 而不是留下 `ldm--xxxx` 这种怪名字
-  const slug = label.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'user';
+  // 中文名被过滤后可能只剩连字符（"宋亚科-永久" → "-"），要再 trim 掉首尾横线
+  const slug =
+    label
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 24) || 'user';
   const tunnelName = `ldm-${slug}-${randomSuffix(4)}`;
   process.stdout.write(`\n[1/3] 创建隧道 ${tunnelName} … `);
   const tunnel = await cf.createTunnel(accountId, tunnelName);
