@@ -1,0 +1,124 @@
+﻿'use strict';
+/**
+ * Cloudflare API 的最小封装（只覆盖 TENANT 用到的几个端点）。
+ *
+ * 需要的环境变量：
+ *   CF_API_TOKEN   API Token，权限：Account → Cloudflare Tunnel: Edit
+ *                                 Zone    → DNS: Edit、Zone: Read
+ *   CF_ACCOUNT_ID  可选，只有一个账号时可以自动取
+ *   CF_ZONE_NAME   可选，默认 teachergeng.space
+ */
+
+// 测试时可用 CF_API_BASE 指向本地 mock，生产环境不要设置
+const API = process.env.CF_API_BASE || 'https://api.cloudflare.com/client/v4';
+
+function token() {
+  const t = process.env.CF_API_TOKEN;
+  if (!t || !t.trim()) {
+    throw new Error(
+      '缺少 CF_API_TOKEN。请到 Cloudflare 控制台 → 我的个人资料 → API 令牌 创建一个，' +
+        '权限至少包含：Cloudflare Tunnel: Edit、DNS: Edit、Zone: Read'
+    );
+  }
+  return t.trim();
+}
+
+async function call(method, path, body) {
+  const res = await fetch(API + path, {
+    method,
+    headers: {
+      authorization: `Bearer ${token()}`,
+      'content-type': 'application/json'
+    },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const text = await res.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Cloudflare 返回了非 JSON（HTTP ${res.status}）：${text.slice(0, 200)}`);
+  }
+  if (!res.ok || json.success === false) {
+    const detail = (json.errors || [])
+      .map((e) => `${e.code || ''} ${e.message || ''}`.trim())
+      .join('; ');
+    throw new Error(`Cloudflare API ${method} ${path} 失败（HTTP ${res.status}）：${detail || text.slice(0, 200)}`);
+  }
+  return json.result;
+}
+
+/** 取第一个账号 ID（个人账号通常只有一个） */
+async function resolveAccountId(explicit) {
+  if (explicit) return explicit;
+  const accounts = await call('GET', '/accounts');
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    throw new Error('这个 API Token 看不到任何账号，检查权限是否包含 Account 级别');
+  }
+  return accounts[0].id;
+}
+
+/** 按域名取 zone ID */
+async function resolveZoneId(zoneName) {
+  const zones = await call('GET', `/zones?name=${encodeURIComponent(zoneName)}`);
+  if (!Array.isArray(zones) || zones.length === 0) {
+    throw new Error(`找不到域名 ${zoneName}（确认它在这个账号下，且 Token 有 Zone:Read）`);
+  }
+  return zones[0].id;
+}
+
+/** 创建一条 remotely-managed 隧道，返回 { id, token } */
+async function createTunnel(accountId, name) {
+  const created = await call('POST', `/accounts/${accountId}/cfd_tunnel`, {
+    name,
+    config_src: 'cloudflare'
+  });
+  let tunnelToken = created.token;
+  if (!tunnelToken) {
+    // 部分账号创建响应不带 token，单独取一次
+    tunnelToken = await call('GET', `/accounts/${accountId}/cfd_tunnel/${created.id}/token`);
+  }
+  if (!tunnelToken) {
+    throw new Error('隧道创建成功，但拿不到令牌；请到控制台复制');
+  }
+  return { id: created.id, token: tunnelToken };
+}
+
+/** 配置公开主机名（入口规则） */
+async function setIngress(accountId, tunnelId, hostname, service) {
+  await call('PUT', `/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`, {
+    config: {
+      ingress: [{ hostname, service }, { service: 'http_status:404' }]
+    }
+  });
+}
+
+/** 建 CNAME 记录指向隧道 */
+async function createDnsRecord(zoneId, hostname, tunnelId) {
+  const rec = await call('POST', `/zones/${zoneId}/dns_records`, {
+    type: 'CNAME',
+    name: hostname,
+    content: `${tunnelId}.cfargotunnel.com`,
+    proxied: true,
+    comment: 'localdanmu tenant'
+  });
+  return rec.id;
+}
+
+async function deleteDnsRecord(zoneId, recordId) {
+  await call('DELETE', `/zones/${zoneId}/dns_records/${recordId}`);
+}
+
+async function deleteTunnel(accountId, tunnelId) {
+  await call('DELETE', `/accounts/${accountId}/cfd_tunnel/${tunnelId}?force=true`);
+}
+
+module.exports = {
+  resolveAccountId,
+  resolveZoneId,
+  createTunnel,
+  setIngress,
+  createDnsRecord,
+  deleteDnsRecord,
+  deleteTunnel
+};

@@ -1,4 +1,4 @@
-# 议题 TENANT：多用户、域名与授权（暂缓）
+﻿# 议题 TENANT：多用户、域名与授权（暂缓）
 
 > 代号 **TENANT**（租户方案）。讨论于 v0.4.1 之后，结论：**先搁置**，先把技术侧收尾。
 > 恢复方式：跟助手说「继续 TENANT」。
@@ -54,13 +54,18 @@
 定位：**不按"域名"收费，按"服务与责任"收费**。
 点赞/推荐换授权可以做促销，但难以自动核实，别做成自动门槛。
 
-## 落地要做的事（尚未开始）
+## 落地进度
 
-1. `tools/provision.js`：调用 Cloudflare API 建隧道 + DNS + Public Hostname，输出令牌
-2. `tools/revoke.js`：按隧道 ID 删除隧道与 DNS
-3. 用户 ↔ 隧道 映射表（本地 JSON 即可）
-4. 子域用随机串（`u7f3k2.dm.…`），不暴露用户身份
-5. 免责声明：流量走作者账号，保留"发现滥用即停用"的权利
+| 事项 | 状态 |
+| --- | --- |
+| `tools/tenant/provision.js`：建隧道 + 入口规则 + DNS，输出令牌 | ✅ 已完成 |
+| `tools/tenant/revoke.js`：按 label/host 删 DNS + 删隧道，支持 `--list` | ✅ 已完成 |
+| 用户 ↔ 隧道 映射表 `tools/tenant/tenants.json`（已 gitignore） | ✅ 已完成 |
+| 子域随机串（`u7f3k2.dm.…`），不暴露用户身份 | ✅ 默认行为 |
+| mock 自测 `tools/tenant/selftest.js`（12 项断言，已接入 CI） | ✅ 已完成 |
+| 真实账号跑一次开通 + 吊销 | ⬜ 待办（需要 API Token） |
+
+操作手册见 [tools/tenant/README.md](../tools/tenant/README.md)。
 
 ## 重要前提
 

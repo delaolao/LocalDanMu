@@ -35,3 +35,7 @@ jobs:
 
       - name: test
         run: cargo test
+
+      - name: TENANT 开通脚本自测（mock API，不联网）
+        working-directory: .
+        run: node tools/tenant/selftest.js

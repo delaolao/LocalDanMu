@@ -21,3 +21,6 @@ desktop.ini
 
 # 工具 crate 的构建产物
 /tools/**/target/
+
+# TENANT：租户记录（含隧道 ID 等敏感信息，不进仓库）
+tools/tenant/tenants.json
