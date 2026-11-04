@@ -1109,7 +1109,7 @@ fn dm_ready(app: AppHandle) -> bool {
 
 /* --------------------------------------------------------------- 远程模式 */
 
-/// 开启远程模式（Cloudflare Quick Tunnel）。这是测试版功能，界面上会提示未加密。
+/// 开启远程模式（Cloudflare Tunnel）。内容强制端到端加密，中继看不到正文。
 #[tauri::command]
 fn tunnel_start(app: AppHandle) -> Value {
     let core = core_of(&app);

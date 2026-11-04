@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -300,7 +300,7 @@
   });
 
   /* ------------------------------------------------------------ 远程模式 */
-  // 测试版：Cloudflare Quick Tunnel，按需下载 cloudflared。数据经过 Cloudflare，未加密。
+  // Cloudflare Tunnel（临时/固定二选一），按需下载 cloudflared；内容端到端加密。
   let lastTunnel = { status: 'idle' };
   let tunnelToken = '';
 

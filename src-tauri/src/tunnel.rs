@@ -1,7 +1,10 @@
-//! 远程模式（测试版）：用 Cloudflare Quick Tunnel 把本机的会话服务暴露到公网，
+//! 远程模式：用 Cloudflare Tunnel 把本机的会话服务暴露到公网，
 //! 让学员在场地 WiFi 不可用时，用手机流量也能进入。
 //!
-//! 设计取舍（这是"测试版"，刻意保持最小）：
+//! 两种形态：临时隧道（Quick Tunnel，地址随机）与固定隧道（Named Tunnel，令牌 + 自有域名）。
+//! 内容端到端加密（强制），密钥只存在于 URL fragment 里，中继看不到正文。
+//!
+//! 设计取舍：
 //! - 不内置 cloudflared（40MB，会毁掉整个应用 5MB 的体积优势），首次使用时下载到
 //!   `%LOCALAPPDATA%\localdanmu\cloudflared.exe` 并缓存
 //! - 先试 Quick Tunnel（随机域名、免账号），也支持 Named Tunnel（固定域名 + 令牌）
@@ -158,6 +161,11 @@ impl Tunnel {
                 g.qr.clear();
             }
         }
+        // 隧道已经失败/关闭，密钥就不该再留着——否则回环连接还会被
+        // 当成"远程模式"来要求加密，和真实状态不符。
+        if status == "error" || status == "idle" {
+            crate::crypto::set_key(&self.key, None);
+        }
         if crate::core::probe_enabled() {
             crate::core::probe_log(&format!("tunnel[{status}] {message}"));
         }
@@ -202,6 +210,12 @@ impl Tunnel {
 
     fn run(self: &Arc<Self>, app: &AppHandle, args: StartArgs) -> Result<(), String> {
         let bin = ensure_binary(app, self, args.cloudflared_path.as_deref())?;
+        // 下载可能耗时几分钟，这期间讲师完全可能已经点了「结束培训」。
+        // 结束培训会 stop()（把 stopped 置真），这里必须尊重它，不能接着拉起隧道。
+        if self.stopped.load(Ordering::SeqCst) {
+            crate::core::probe_log("run: 下载完成时已被取消，不再启动隧道");
+            return Ok(());
+        }
         let fixed = !args.tunnel_token.is_empty();
 
         if fixed && args.host.trim().is_empty() {
@@ -298,6 +312,7 @@ impl Tunnel {
         let reader = std::thread::spawn(move || {
             let tail_buf = tail_in;
             let mut found = false;
+            let mut ready_url: Option<String> = None;
             if let Some(err) = stderr {
                 for line in BufReader::new(err).lines().map_while(Result::ok) {
                     if !line.trim().is_empty() {
@@ -308,19 +323,49 @@ impl Tunnel {
                             }
                         }
                     }
-                    if !found {
-                        if fixed {
-                            // 固定隧道：地址是我们自己的域名，连接器注册成功即可用
-                            if line.contains("Registered tunnel connection") {
-                                found = true;
-                                let join = format!("https://{host}/j/{token}#k={frag}");
-                                me2.set(&app2, "running", Some(join), "固定隧道已连接，地址不会变");
-                            }
-                        } else if let Some(m) = url_re.find(&line) {
+                    if !found && ready_url.is_none() {
+                        let maybe = if fixed {
+                            line.contains("Registered tunnel connection")
+                                .then(|| format!("https://{host}/j/{token}#k={frag}"))
+                        } else {
+                            url_re
+                                .find(&line)
+                                .map(|m| format!("{}/j/{token}#k={frag}", m.as_str()))
+                        };
+                        if let Some(join) = maybe {
                             found = true;
-                            let base = m.as_str().to_string();
-                            let join = format!("{base}/j/{token}#k={frag}");
-                            me2.set(&app2, "running", Some(join), "隧道已就绪，手机用流量可访问");
+                            ready_url = Some(join.clone());
+                            // 不要在这里 break：读线程提前退出会关掉 stderr 管道，
+                            // cloudflared 再写日志就会失败退出。探测交给独立线程。
+                            let me_p = Arc::clone(&me2);
+                            let app_p = app2.clone();
+                            std::thread::spawn(move || {
+                                let base = join.split("/j/").next().unwrap_or("").to_string();
+                                me_p.set(
+                                    &app_p,
+                                    "starting",
+                                    None,
+                                    "隧道已连上，正在确认公网入口可用…",
+                                );
+                                if !probe_public_entry(&base) {
+                                    me_p.set(
+                                        &app_p,
+                                        "error",
+                                        None,
+                                        "隧道已连接但公网入口尚未生效（疑似 1033），请稍后重试",
+                                    );
+                                    return;
+                                }
+                                if me_p.stopped.load(Ordering::SeqCst) {
+                                    return;
+                                }
+                                let msg = if fixed {
+                                    "固定隧道已连接，地址不会变"
+                                } else {
+                                    "隧道已就绪，手机用流量可访问"
+                                };
+                                me_p.set(&app_p, "running", Some(join), msg);
+                            });
                         }
                     }
                     // 只有"确定建不起来"才算失败。
@@ -368,6 +413,13 @@ impl Tunnel {
             }
             found
         });
+
+        if self.stopped.load(Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            crate::core::probe_log("run: 启动瞬间被取消，已杀掉子进程");
+            return Ok(());
+        }
 
         {
             let mut g = self.inner.lock().unwrap();
@@ -591,6 +643,88 @@ pub fn validate_exe(path: &Path) -> Result<u64, String> {
 const RELEASE_API: &str = "https://api.github.com/repos/cloudflare/cloudflared/releases/latest";
 const ASSET_NAME: &str = "cloudflared-windows-amd64.exe";
 
+/// 探测公网入口是否真的可用（`{base}/healthz` 返回 200）。
+///
+/// Cloudflare 侧从"连接器注册成功"到"域名真正能路由"有几秒延迟，
+/// 这段时间内访问就是 1033。最多等 ~12 秒，2 秒一次。
+fn probe_public_entry(base: &str) -> bool {
+    if base.is_empty() {
+        return true; // 解析不出来就别拦着用户
+    }
+    let url = format!("{base}/healthz");
+    for attempt in 1..=6 {
+        if attempt > 1 {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        let out = Command::new("curl.exe")
+            .args([
+                "-sS",
+                "-o",
+                "NUL",
+                "-w",
+                "%{http_code}",
+                "--max-time",
+                "6",
+                "--ssl-no-revoke",
+                &url,
+            ])
+            .creation_flags(0x0800_0000)
+            .output();
+        if let Ok(out) = out {
+            if String::from_utf8_lossy(&out.stdout).trim() == "200" {
+                crate::core::probe_log(&format!(
+                    "probe_public_entry: {url} 已就绪（第 {attempt} 次）"
+                ));
+                return true;
+            }
+        }
+        crate::core::probe_log(&format!("probe_public_entry: 第 {attempt} 次未就绪"));
+    }
+    false
+}
+
+/// 进程内缓存一份官方哈希：同一次启动里多处校验都复用它，避免反复请求 API。
+/// 只缓存成功结果——取不到（离线）时下次还能再试。
+fn expected_sha256_cached() -> Option<String> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<String> = OnceLock::new();
+    if let Some(v) = CACHE.get() {
+        return Some(v.clone());
+    }
+    let v = expected_sha256()?;
+    let _ = CACHE.set(v.clone());
+    Some(v)
+}
+
+/// 一个候选文件的信任级别。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Trust {
+    /// 与官方发布的 SHA-256 一致
+    Verified,
+    /// 拿不到官方哈希，只做了大小与 MZ 校验
+    Unverified,
+}
+
+/// 统一的候选校验：大小/MZ 是底线，能拿到官方哈希就必须匹配。
+fn check_binary(path: &Path, expected: Option<&str>) -> Result<Trust, String> {
+    validate_exe(path)?;
+    match expected {
+        Some(want) => {
+            let got = sha256_file(path).ok_or_else(|| "读不出文件，无法校验".to_string())?;
+            if got == want {
+                Ok(Trust::Verified)
+            } else {
+                Err(format!(
+                    "SHA-256 与官方发布不一致（期望 {}…，实际 {}…），可能被改动过",
+                    &want[..want.len().min(12)],
+                    &got[..got.len().min(12)]
+                ))
+            }
+        }
+        None => Ok(Trust::Unverified),
+    }
+}
+
 /// 从 GitHub API 取官方发布的 SHA-256（`digest` 字段，形如 `sha256:xxxx`）。
 ///
 /// 取不到（离线、被拦、限流）时返回 None——调用方会降级为"只做大小/MZ 校验"，
@@ -812,7 +946,7 @@ fn install_binary(from: &Path, to: &Path) -> Result<(), String> {
 /// 实测反馈：自动下载失败时，人的第一反应就是用浏览器手动下载到「下载」文件夹。
 /// 旧版本完全无视那个文件，非要自己再下一遍——于是用户只能手动改名、手动搬到
 /// `%LOCALAPPDATA%\localdanmu\` 才能用。这里主动找一下，找到就直接复制进缓存。
-fn find_nearby_cloudflared() -> Option<PathBuf> {
+fn find_nearby_cloudflared(expected: Option<&str>) -> Option<(PathBuf, Trust)> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Ok(profile) = std::env::var("USERPROFILE") {
         let p = PathBuf::from(profile);
@@ -840,8 +974,13 @@ fn find_nearby_cloudflared() -> Option<PathBuf> {
             if !name.starts_with("cloudflared") || !name.ends_with(".exe") {
                 continue;
             }
-            if validate_exe(&path).is_ok() {
-                return Some(path);
+            if let Ok(trust) = check_binary(&path, expected) {
+                crate::core::probe_log(&format!(
+                    "find_nearby: 采用 {}（{:?}）",
+                    path.display(),
+                    trust
+                ));
+                return Some((path, trust));
             }
         }
     }
@@ -860,10 +999,27 @@ fn ensure_binary(
         override_path,
         bin_dir().join("cloudflared.exe").display()
     ));
+    let expected = expected_sha256_cached();
+    match &expected {
+        Some(h) => crate::core::probe_log(&format!("ensure_binary: 官方 SHA-256 = {h}")),
+        None => crate::core::probe_log("ensure_binary: 取不到官方 SHA-256，仅做大小/MZ 校验"),
+    }
+    let expected_ref = expected.as_deref();
+
     if let Some(raw) = override_path.map(str::trim).filter(|s| !s.is_empty()) {
         let p = PathBuf::from(raw);
+        // 手动指定是"自动下载怎么都不行"时的逃生口，用户自己选的版本可能就是别的版本，
+        // 所以这里只做大小/MZ 底线校验，界面明确提示"未经官方哈希校验"。
         return match validate_exe(&p) {
-            Ok(_) => Ok(p),
+            Ok(_) => {
+                t.set(
+                    app,
+                    "starting",
+                    None,
+                    "使用手动指定的 cloudflared（未经官方哈希校验）",
+                );
+                Ok(p)
+            }
             Err(e) => Err(format!(
                 "设置里指定的 cloudflared 不可用（{e}）：{}\n请重新指定，或清空这项设置改回自动下载。",
                 p.display()
@@ -878,12 +1034,20 @@ fn ensure_binary(
     //    一直当成好 exe 用下去，重试多少次都失败，且错误信息毫无线索。
     crate::core::probe_log(&format!("ensure_binary: 缓存存在={}", path.is_file()));
     if path.is_file() {
-        match validate_exe(&path) {
-            Ok(_) => {
+        match check_binary(&path, expected_ref) {
+            Ok(trust) => {
                 crate::core::probe_log(&format!(
-                    "ensure_binary: 缓存有效，直接用 {}",
+                    "ensure_binary: 缓存有效（{trust:?}），直接用 {}",
                     path.display()
                 ));
+                if trust == Trust::Unverified {
+                    t.set(
+                        app,
+                        "starting",
+                        None,
+                        "已缓存的 cloudflared 无法与官方哈希比对（离线），继续使用",
+                    );
+                }
                 return Ok(path);
             }
             Err(e) => {
@@ -923,7 +1087,7 @@ fn ensure_binary(
 
     // 2.5) 用户可能已经用浏览器手动下载好了（下载/桌面/exe 同级目录），先找一下。
     //      注意用 copy 而不是 move：不能把人家的原文件搬走。
-    if let Some(found) = find_nearby_cloudflared() {
+    if let Some((found, _trust)) = find_nearby_cloudflared(expected_ref) {
         crate::core::probe_log(&format!("ensure_binary: 发现现成文件 {}", found.display()));
         t.set(
             app,
@@ -934,7 +1098,7 @@ fn ensure_binary(
                 found.display()
             ),
         );
-        if std::fs::copy(&found, &path).is_ok() && validate_exe(&path).is_ok() {
+        if std::fs::copy(&found, &path).is_ok() && check_binary(&path, expected_ref).is_ok() {
             t.set(
                 app,
                 "starting",
@@ -951,11 +1115,14 @@ fn ensure_binary(
     let sources = download_sources();
     let mut failures: Vec<String> = Vec::new();
 
-    // 下载前先问一次官方哈希。拿不到就降级（只校验大小与 MZ），并在状态里说清楚。
-    let expected = expected_sha256();
-    match &expected {
-        Some(h) => crate::core::probe_log(&format!("ensure_binary: 官方 SHA-256 = {h}")),
-        None => crate::core::probe_log("ensure_binary: 取不到官方 SHA-256，将跳过哈希校验"),
+    // 下载前先问一次官方哈希。拿不到就降级（只校验大小与 MZ），并在界面上说明。
+    if expected.is_none() {
+        t.set(
+            app,
+            "downloading",
+            None,
+            "取不到官方 SHA-256（网络无法访问 GitHub API），本次只做大小/文件头校验…",
+        );
     }
 
     for (i, (label, url)) in sources.iter().enumerate() {
@@ -974,28 +1141,14 @@ fn ensure_binary(
         crate::core::probe_log(&format!("ensure_binary: 尝试源 {label}"));
         match download_one(app, t, label, url, &part) {
             Ok((bytes, written)) => {
-                // 哈希校验：来源是第三方镜像，必须确认它和官方发布的是同一个文件
-                if let Some(want) = &expected {
+                // 来源是第三方镜像，必须确认它和官方发布的是同一个文件
+                if expected.is_some() {
                     t.set(app, "downloading", None, "正在校验下载文件的 SHA-256…");
-                    match sha256_file(&written) {
-                        Some(got) if &got == want => {
-                            crate::core::probe_log("ensure_binary: SHA-256 校验通过");
-                        }
-                        Some(got) => {
-                            let _ = std::fs::remove_file(&written);
-                            failures.push(format!(
-                                "{label}：SHA-256 不匹配（期望 {}…，实际 {}…），已丢弃",
-                                &want[..12],
-                                &got[..12]
-                            ));
-                            continue;
-                        }
-                        None => {
-                            let _ = std::fs::remove_file(&written);
-                            failures.push(format!("{label}：下载完成但读不出文件，无法校验"));
-                            continue;
-                        }
-                    }
+                }
+                if let Err(e) = check_binary(&written, expected.as_deref()) {
+                    let _ = std::fs::remove_file(&written);
+                    failures.push(format!("{label}：{e}，已丢弃"));
+                    continue;
                 }
                 // 用 download_one 实际写入的那个临时文件（名字带时间戳）来安装，
                 // 不能再用这里的 part——两者不是同一个文件（这里踩过一次）。

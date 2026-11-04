@@ -583,20 +583,13 @@ async fn ws_handler(
 }
 
 /// 从 Cloudflare 转发头里取真实客户端 IP。
-/// 优先 `CF-Connecting-IP`，退回 `X-Forwarded-For` 的第一段。
+///
+/// **只认 `CF-Connecting-IP`**：这个头由 Cloudflare 边缘注入，客户端无法覆盖。
+/// `X-Forwarded-For` 是可以由调用方自己构造的，用它做限流键等于给了伪造入口，
+/// 所以这里刻意不回退。拿不到就返回 None，调用方回退到套接字地址。
 fn forwarded_client_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    if let Some(v) = headers
-        .get("cf-connecting-ip")
-        .and_then(|v| v.to_str().ok())
-    {
-        if let Ok(ip) = v.trim().parse::<IpAddr>() {
-            return Some(ip);
-        }
-    }
-    let xff = headers.get("x-forwarded-for")?.to_str().ok()?;
-    xff.split(',')
-        .next()
-        .and_then(|first| first.trim().parse::<IpAddr>().ok())
+    let v = headers.get("cf-connecting-ip")?.to_str().ok()?;
+    v.trim().parse::<IpAddr>().ok()
 }
 
 /// 每条连接自己的会话状态（不共享、不过锁）。
@@ -1309,13 +1302,11 @@ mod tests {
     }
 
     #[test]
-    fn forwarded_ip_falls_back_to_xff_first_hop() {
+    fn forwarded_ip_ignores_spoofable_xff() {
+        // X-Forwarded-For 客户端可伪造，必须无视
         let mut h = HeaderMap::new();
         h.insert("x-forwarded-for", "198.51.100.7, 10.0.0.1".parse().unwrap());
-        assert_eq!(
-            forwarded_client_ip(&h),
-            Some("198.51.100.7".parse().unwrap())
-        );
+        assert_eq!(forwarded_client_ip(&h), None);
     }
 
     #[test]
