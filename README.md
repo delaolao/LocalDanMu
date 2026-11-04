@@ -209,16 +209,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-win.ps1
 
 > 别把**隧道令牌**（`eyJhIjoi...`）当成 API 令牌。API 令牌是 40 位随机串，只在开通/吊销时用。
 
-### 开通
+### 开通（网页版，推荐）
 
 ```powershell
 cd D:\teachergeng\LocalDanMu
+node tools/tenant/ui.js
+```
+
+浏览器会打开一个本地页面：粘贴 API 令牌 → 填标签 →域名标识自动生成（可改）→ 点「开通」。
+结果区直接给「公开域名」和「隧道令牌」，各带复制按钮；下方列出已开通的人，每人一个「吊销」按钮。
+
+想先看效果可以加 `--mock`（假 API，不会真的建东西）。
+
+### 开通（命令行，适合脚本化）
+
+```powershell
 $env:CF_API_TOKEN = "你的 API 令牌"
-
-# 先确认令牌能用（不建任何东西）
-node tools/tenant/provision.js --label x --check
-
-# 正式开通
+node tools/tenant/provision.js --label x --check          # 先验证令牌，不建东西
 node tools/tenant/provision.js --label "张三-2026春季" --host zhangsan
 ```
 
