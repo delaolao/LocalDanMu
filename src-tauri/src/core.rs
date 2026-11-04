@@ -1,4 +1,4 @@
-//! 会话与状态中枢：把「服务端 <-> 窗口」粘起来的那一层。
+﻿//! 会话与状态中枢：把「服务端 <-> 窗口」粘起来的那一层。
 //!
 //! 对应旧版 `main.js` 里除窗口管理以外的部分：
 //! 历史（仅内存）、会话生命周期、网络重算、二维码刷新、状态推送、点赞复现。
@@ -102,13 +102,20 @@ pub struct AppCore {
     last_like_replay: Mutex<Option<Instant>>,
     /// 远程模式的端到端密钥槽（与 Tunnel 共享）
     remote_key: crate::crypto::RemoteKey,
+    /// 远程隧道：会话结束时必须由这里统一关掉，避免公网入口残留
+    tunnel: Arc<crate::tunnel::Tunnel>,
 }
 
 impl AppCore {
-    pub fn new(settings: Arc<Store>, remote_key: crate::crypto::RemoteKey) -> Arc<AppCore> {
+    pub fn new(
+        settings: Arc<Store>,
+        remote_key: crate::crypto::RemoteKey,
+        tunnel: Arc<crate::tunnel::Tunnel>,
+    ) -> Arc<AppCore> {
         Arc::new(AppCore {
             settings,
             remote_key,
+            tunnel,
             history: Mutex::new(Vec::new()),
             session: Mutex::new(None),
             bridge: Mutex::new(None),
@@ -210,6 +217,8 @@ impl AppCore {
     }
 
     pub async fn end_session(self: &Arc<Self>) {
+        // 先关隧道：公网入口不能比会话活得更久
+        self.tunnel.stop();
         self.ended.store(true, Ordering::SeqCst);
         self.paused.store(false, Ordering::SeqCst);
         let bridge = self.bridge.lock().ok().and_then(|mut g| g.take());
@@ -230,6 +239,8 @@ impl AppCore {
     }
 
     pub async fn restart_session(self: &Arc<Self>) {
+        // 房间号会换，旧隧道的 URL 必然失效，先停
+        self.tunnel.stop();
         let bridge = self.bridge.lock().ok().and_then(|mut g| g.take());
         if let Some(b) = bridge {
             b.shutdown("restart").await;

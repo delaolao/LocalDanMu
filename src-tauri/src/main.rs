@@ -1,4 +1,4 @@
-//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
+﻿//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
 //!
 //! 对应旧版 `src/main/main.js`。这里只做**编排**，业务都在各模块里：
 //! - `settings`  设置项持久化（白名单 + 防抖落盘 + 便携模式）
@@ -110,9 +110,10 @@ fn main() {
             let store = Store::open(data_dir.join("settings.json"));
             // 远程模式的端到端密钥槽：Tunnel 写入，服务端按连接读取
             let remote_key = crypto::new_slot();
-            let core = AppCore::new(store, remote_key.clone());
+            let tunnel = Tunnel::new(remote_key.clone(), handle.clone());
+            let core = AppCore::new(store, remote_key, Arc::clone(&tunnel));
             app.manage(Arc::clone(&core));
-            app.manage(Tunnel::new(remote_key));
+            app.manage(tunnel);
 
             // 窗口先出来，讲师有东西可看
             windows::create_control(&handle)?;
@@ -154,17 +155,14 @@ fn main() {
                         let cfg = core_bg.settings.get();
                         let t = handle_bg.state::<std::sync::Arc<Tunnel>>().inner().clone();
                         core::probe_log("LDM_TUNNEL: 自动开启隧道");
-                        t.start(
-                            handle_bg.clone(),
-                            tunnel::StartArgs {
-                                port: session.port,
-                                room: session.token.clone(),
-                                tunnel_token: cfg.tunnel_token.clone(),
-                                host: cfg.tunnel_host.clone(),
-                                cloudflared_path: Some(cfg.cloudflared_path.clone())
-                                    .filter(|s| !s.trim().is_empty()),
-                            },
-                        );
+                        t.start(tunnel::StartArgs {
+                            port: session.port,
+                            room: session.token.clone(),
+                            tunnel_token: cfg.tunnel_token.clone(),
+                            host: cfg.tunnel_host.clone(),
+                            cloudflared_path: Some(cfg.cloudflared_path.clone())
+                                .filter(|s| !s.trim().is_empty()),
+                        });
                     }
                 }
                 // 网络位置探测会起一次 PowerShell，放后台
@@ -985,23 +983,20 @@ fn tunnel_start(app: AppHandle) -> Value {
         return json!({ "status": "error", "message": "会话还没启动", "url": "", "qr": "" });
     };
     let cfg = core.settings.get();
-    t.start(
-        app.clone(),
-        tunnel::StartArgs {
+    t.start(tunnel::StartArgs {
             port: session.port,
             room: session.token.clone(),
             tunnel_token: cfg.tunnel_token.clone(),
             host: cfg.tunnel_host.clone(),
             cloudflared_path: Some(cfg.cloudflared_path.clone()).filter(|s| !s.trim().is_empty()),
-        },
-    );
+    });
     t.snapshot()
 }
 
 #[tauri::command]
 fn tunnel_stop(app: AppHandle) -> Value {
     let t = app.state::<std::sync::Arc<Tunnel>>().inner().clone();
-    t.stop(&app);
+    t.stop();
     t.snapshot()
 }
 

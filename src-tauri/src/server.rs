@@ -21,7 +21,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, Path, Query, State};
-use axum::http::{header, HeaderName, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
@@ -528,14 +528,36 @@ async fn ws_handler(
     State(st): State<ServerState>,
     Query(q): Query<WsQuery>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
     let enc = q.enc.as_deref() == Some("1");
+    // 隧道会把所有连接的源地址都变成 127.0.0.1，真正的学员 IP 在 CF-Connecting-IP 里。
+    // 只对回环连接采信这个头：局域网直连的客户端伪造它没有意义，也拿不到额外好处。
+    let client_ip = if peer.ip().is_loopback() {
+        forwarded_client_ip(&headers).unwrap_or_else(|| peer.ip())
+    } else {
+        peer.ip()
+    };
     if !timing_safe_eq(&q.t.unwrap_or_default(), &st.token) {
         return respond(StatusCode::UNAUTHORIZED, b"Unauthorized".to_vec(), "text/plain; charset=utf-8");
     }
     ws.max_message_size(MAX_MESSAGE_BYTES)
-        .on_upgrade(move |socket| handle_socket(socket, st, peer.ip(), enc))
+        .on_upgrade(move |socket| handle_socket(socket, st, client_ip, peer.ip().is_loopback(), enc))
+}
+
+/// 从 Cloudflare 转发头里取真实客户端 IP。
+/// 优先 `CF-Connecting-IP`，退回 `X-Forwarded-For` 的第一段。
+fn forwarded_client_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    if let Some(v) = headers.get("cf-connecting-ip").and_then(|v| v.to_str().ok()) {
+        if let Ok(ip) = v.trim().parse::<IpAddr>() {
+            return Some(ip);
+        }
+    }
+    let xff = headers.get("x-forwarded-for")?.to_str().ok()?;
+    xff.split(',')
+        .next()
+        .and_then(|first| first.trim().parse::<IpAddr>().ok())
 }
 
 /// 每条连接自己的会话状态（不共享、不过锁）。
@@ -553,7 +575,13 @@ async fn send_json(socket: &mut WebSocket, payload: &Value) {
     let _ = socket.send(Message::Text(payload.to_string().into())).await;
 }
 
-async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr, wants_enc: bool) {
+async fn handle_socket(
+    mut socket: WebSocket,
+    st: ServerState,
+    ip: IpAddr,        // 限流用的「真实客户端 IP」（隧道下来自 CF-Connecting-IP）
+    loopback: bool,    // 套接字本身是不是回环（决定要不要走端到端加密，绝不能用转发头判断）
+    wants_enc: bool,
+) {
     let mut conn = Conn {
         last_sent_at: None,
         msg_ids: VecDeque::new(),
@@ -570,7 +598,7 @@ async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr, wants
     // fail-closed：远程模式开着（密钥存在）时，回环连接必须声明 enc=1。
     // 客户端丢掉了 #k=、浏览器不支持 WebCrypto 或手输了地址，都不再降级为明文，
     // 直接断开——宁可连不上，也不能让内容裸奔。
-    let enc_key = if ip.is_loopback() {
+    let enc_key = if loopback {
         crate::crypto::get_key(&st.remote_key)
     } else {
         None
@@ -1162,6 +1190,29 @@ async fn bind_port(preferred: u16) -> std::io::Result<tokio::net::TcpListener> {
 mod tests {
     use super::*;
     use crate::filter::Level;
+
+    #[test]
+    fn forwarded_ip_prefers_cf_header() {
+        let mut h = HeaderMap::new();
+        h.insert("cf-connecting-ip", "203.0.113.9".parse().unwrap());
+        h.insert("x-forwarded-for", "198.51.100.1, 10.0.0.1".parse().unwrap());
+        assert_eq!(forwarded_client_ip(&h), Some("203.0.113.9".parse().unwrap()));
+    }
+
+    #[test]
+    fn forwarded_ip_falls_back_to_xff_first_hop() {
+        let mut h = HeaderMap::new();
+        h.insert("x-forwarded-for", "198.51.100.7, 10.0.0.1".parse().unwrap());
+        assert_eq!(forwarded_client_ip(&h), Some("198.51.100.7".parse().unwrap()));
+    }
+
+    #[test]
+    fn forwarded_ip_rejects_garbage() {
+        let mut h = HeaderMap::new();
+        h.insert("cf-connecting-ip", "not-an-ip".parse().unwrap());
+        assert_eq!(forwarded_client_ip(&h), None);
+        assert_eq!(forwarded_client_ip(&HeaderMap::new()), None);
+    }
     use futures_util::{SinkExt, StreamExt};
     use std::sync::Mutex as StdMutex;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
