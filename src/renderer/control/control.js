@@ -215,6 +215,12 @@
     setControl('pwdInput', cfg.wifiPassword || '');
     setControl('filterSel', cfg.filterLevel || 'block');
     setControl('tunnelHostInput', cfg.tunnelHost || '');
+    const noFixed = !(cfg.tunnelToken || '').trim();
+    const remoteNote = $('remoteNote');
+    if (remoteNote && noFixed && lastTunnel.status === 'idle') {
+      remoteNote.textContent =
+        '当前未配置固定域名：临时隧道仅作应急，地址每次都会变，国内网络下可能不稳定。建议在「设置与网络 → 固定隧道」里配好域名与令牌。';
+    }
     setControl('tunnelTokenInput', cfg.tunnelToken || '');
     setControl('wordsInput', cfg.customWords || '');
 

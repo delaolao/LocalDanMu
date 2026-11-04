@@ -15,7 +15,7 @@
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,6 +30,8 @@ const ASSET_URL: &str =
 
 /// 体积下限。实际约 53MB，低于 10MB 一定不是完整文件。
 const MIN_EXE_BYTES: u64 = 10 * 1024 * 1024;
+/// 连续自动重连的上限：超过就停下来，别把 Cloudflare 当靶子
+const MAX_AUTO_RETRIES: u32 = 8;
 
 /// 预期体积，仅用于进度文案（真实值随版本变化，只求量级对）
 const EXPECTED_BYTES: u64 = 53 * 1024 * 1024;
@@ -73,6 +75,10 @@ pub struct Tunnel {
     auto: AtomicBool,
     /// 是否正在等待重连（防止重复排队）
     retrying: AtomicBool,
+    /// 连续自动重试次数（成功后清零）
+    attempts: AtomicU32,
+    /// 运行期看门狗是否已在跑
+    watching: AtomicBool,
     /// 讲师主动关闭时为 true，重连逻辑据此判断"不是意外掉线"
     stopped: AtomicBool,
     /// 最近一次成功启动的参数，重连时复用
@@ -92,6 +98,8 @@ impl Tunnel {
             key,
             auto: AtomicBool::new(false),
             retrying: AtomicBool::new(false),
+            attempts: AtomicU32::new(0),
+            watching: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
             last: Mutex::new(None),
             app,
@@ -115,9 +123,31 @@ impl Tunnel {
         if self.retrying.swap(true, Ordering::SeqCst) {
             return;
         }
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
+        if attempt >= MAX_AUTO_RETRIES {
+            self.retrying.store(false, Ordering::SeqCst);
+            let app = self.app.clone();
+            self.set(
+                &app,
+                "error",
+                None,
+                &format!("已连续自动重试 {MAX_AUTO_RETRIES} 次仍未成功，请检查网络后手动重试"),
+            );
+            return;
+        }
+        // 3s → 6s → 12s → 24s，封顶 30s，再加 0~1s 抖动避免整齐撞车
+        let base = 3u64 << attempt.min(3);
+        let jitter = {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos() as u64)
+                .unwrap_or(0);
+            nanos % 1000
+        };
+        let delay = Duration::from_millis(base.min(30) * 1000 + jitter);
         let me = Arc::clone(self);
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(3));
+            std::thread::sleep(delay);
             me.retrying.store(false, Ordering::SeqCst);
             if !me.auto.load(Ordering::SeqCst) || me.stopped.load(Ordering::SeqCst) {
                 return;
@@ -165,6 +195,9 @@ impl Tunnel {
         // 当成"远程模式"来要求加密，和真实状态不符。
         if status == "error" || status == "idle" {
             crate::crypto::set_key(&self.key, None);
+        }
+        if status == "running" {
+            self.attempts.store(0, Ordering::SeqCst);
         }
         if crate::core::probe_enabled() {
             crate::core::probe_log(&format!("tunnel[{status}] {message}"));
@@ -324,8 +357,9 @@ impl Tunnel {
                             }
                         }
                     }
-                    // 快速隧道：地址横幅比"注册成功"先出现，先记下来
-                    if !fixed && pending_url.is_none() {
+                    // 快速隧道：地址横幅比"注册成功"先出现，先记下来；
+                    // 运行中如果又冒出不同的地址，说明云端重新分配了，旧二维码已经失效。
+                    if !fixed {
                         if let Some(m) = url_re.find(&line) {
                             let base = m.as_str();
                             let host_only = base
@@ -337,10 +371,30 @@ impl Tunnel {
                             if host_only != "api.trycloudflare.com"
                                 && host_only != "www.trycloudflare.com"
                             {
-                                pending_url = Some(base.to_string());
-                                crate::core::probe_log(&format!(
-                                    "run: 拿到临时地址 {base}，等待连接器注册"
-                                ));
+                                let changed = pending_url
+                                    .as_deref()
+                                    .map(|old| old != base)
+                                    .unwrap_or(true);
+                                if changed {
+                                    let was_running = {
+                                        let g = me2.inner.lock().unwrap();
+                                        g.status == "running"
+                                    };
+                                    pending_url = Some(base.to_string());
+                                    crate::core::probe_log(&format!(
+                                        "run: 临时地址 -> {base}（running={was_running}）"
+                                    ));
+                                    if was_running {
+                                        // 旧二维码已经是死地址，重开一条并刷新
+                                        me2.set(
+                                            &app2,
+                                            "error",
+                                            None,
+                                            "临时地址已变更，正在重新建立隧道…",
+                                        );
+                                        me2.schedule_restart();
+                                    }
+                                }
                             }
                         }
                     }
@@ -383,6 +437,7 @@ impl Tunnel {
                                             Some(join.clone()),
                                             "隧道已就绪（本机无法自测，已按连接器状态放行）",
                                         );
+                                        me_p.spawn_watchdog(base.clone());
                                         return;
                                     }
                                     ProbeResult::NotReady(code) => {
@@ -405,6 +460,8 @@ impl Tunnel {
                                             "probe_public_entry: 失败 HTTP {code}"
                                         ));
                                         me_p.set(&app_p, "error", None, msg);
+                                        // 瞬态 1033 正适合交给自动续连，而不是停在原地等讲师点重试
+                                        me_p.schedule_restart();
                                         return;
                                     }
                                 }
@@ -420,9 +477,11 @@ impl Tunnel {
                                 let msg = if fixed {
                                     "固定隧道已连接，地址不会变"
                                 } else {
-                                    "隧道已就绪，手机用流量可访问"
+                                    "临时隧道已就绪（应急用，地址每次都会变）"
                                 };
+                                let watchdog_base = base.clone();
                                 me_p.set(&app_p, "running", Some(join), msg);
+                                me_p.spawn_watchdog(watchdog_base);
                             });
                         }
                     }
@@ -714,6 +773,60 @@ pub fn validate_exe(path: &Path) -> Result<u64, String> {
 const RELEASE_API: &str = "https://api.github.com/repos/cloudflare/cloudflared/releases/latest";
 const ASSET_NAME: &str = "cloudflared-windows-amd64.exe";
 
+impl Tunnel {
+    /// 运行期看门狗：每 25 秒探一次入口，连续 3 次拿到非 200 的 HTTP 响应就判定入口失效，
+    /// 交给自动重连（或直接报错）。
+    ///
+    /// 只把「有 HTTP 响应但非 200」计入失败：DNS 不可解析这类"本机看不到"的情况判不了，
+    /// 记进去会在这类网络下疯狂误报。
+    fn spawn_watchdog(self: &Arc<Self>, base: String) {
+        if self.watching.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let me = Arc::clone(self);
+        std::thread::spawn(move || {
+            let mut fails = 0u32;
+            loop {
+                std::thread::sleep(Duration::from_secs(25));
+                if me.stopped.load(Ordering::SeqCst) {
+                    break;
+                }
+                let alive = {
+                    let g = me.inner.lock().unwrap();
+                    g.status == "running" && g.child.is_some()
+                };
+                if !alive {
+                    break;
+                }
+                match probe_public_entry(&base) {
+                    ProbeResult::Ready => fails = 0,
+                    ProbeResult::NotReady(code) => {
+                        fails += 1;
+                        crate::core::probe_log(&format!(
+                            "watchdog: 入口返回 {code}（连续 {fails} 次）"
+                        ));
+                        if fails >= 3 {
+                            let app = me.app.clone();
+                            me.set(
+                                &app,
+                                "error",
+                                None,
+                                "公网入口连续 3 次不可用（1033/502），正在尝试恢复",
+                            );
+                            me.schedule_restart();
+                            break;
+                        }
+                    }
+                    ProbeResult::Unreachable => {
+                        // 本机到该域名不可达（DNS 污染），无法判定，不计入失败
+                    }
+                }
+            }
+            me.watching.store(false, Ordering::SeqCst);
+        });
+    }
+}
+
 /// 探测公网入口是否真的可用（`{base}/healthz` 返回 200）。
 ///
 /// Cloudflare 侧从"连接器注册成功"到"域名真正能路由"有几秒延迟，
@@ -754,6 +867,10 @@ fn probe_public_entry(base: &str) -> ProbeResult {
                 "--max-time",
                 "6",
                 "--ssl-no-revoke",
+                // 固定绕过系统代理：要测的是"公网能不能到 Cloudflare 入口"，
+                // 走代理会把公司/校园代理的可用性混进来
+                "--noproxy",
+                "*",
                 &url,
             ])
             .creation_flags(0x0800_0000)
