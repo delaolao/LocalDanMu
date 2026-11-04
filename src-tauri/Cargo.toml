@@ -1,6 +1,6 @@
 [package]
 name = "localdanmu"
-version = "0.3.5"
+version = "0.3.6"
 description = "线下培训弹幕互动平台（局域网自建版，数据不出本机）"
 authors = ["LocalDanMu"]
 license = "MIT"

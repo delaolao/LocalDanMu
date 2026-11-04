@@ -1,4 +1,4 @@
-//! 会话服务：HTTP 静态资源 + WebSocket 会话，**共用一个端口**。
+﻿//! 会话服务：HTTP 静态资源 + WebSocket 会话，**共用一个端口**。
 //!
 //! 对应旧版 `src/main/server.js`，协议、限流参数、校验规则逐条对齐：
 //!
@@ -566,11 +566,28 @@ async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr, wants
 
     // 只有隧道转发进来的连接（对端是回环地址）才启用端到端加密。
     // 局域网连接保持明文：零开销，且不改变原有协议。
-    let enc_key = if wants_enc && ip.is_loopback() {
+    //
+    // fail-closed：远程模式开着（密钥存在）时，回环连接必须声明 enc=1。
+    // 客户端丢掉了 #k=、浏览器不支持 WebCrypto 或手输了地址，都不再降级为明文，
+    // 直接断开——宁可连不上，也不能让内容裸奔。
+    let enc_key = if ip.is_loopback() {
         crate::crypto::get_key(&st.remote_key)
     } else {
         None
     };
+    if enc_key.is_some() && !wants_enc {
+        let _ = socket
+            .send(Message::Text(
+                json!({ "type": "error", "reason": "enc_required", "message": "远程模式要求加密连接，请重新扫码" })
+                    .to_string()
+                    .into(),
+            ))
+            .await;
+        // 给客户端一点时间收到这帧再关，否则会变成 1006 异常断开、提示也丢了
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
 
     // hello：带上最近几条，避免新进来的观众看到一片空白
     let hello = {
@@ -589,7 +606,14 @@ async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr, wants
         })
     };
     let hello_text = match enc_key {
-        Some(k) => crate::crypto::wrap(&k, &hello.to_string()).unwrap_or_else(|| hello.to_string()),
+        Some(k) => match crate::crypto::wrap(&k, &hello.to_string()) {
+            Some(v) => v,
+            None => {
+                // 加密失败也绝不回退明文
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
+        },
         None => hello.to_string(),
     };
     if socket.send(Message::Text(hello_text.into())).await.is_err() {
@@ -651,7 +675,10 @@ async fn handle_socket(mut socket: WebSocket, st: ServerState, ip: IpAddr, wants
             broadcast = rx.recv() => {
                 if let Ok(text) = broadcast {
                     let out = match enc_key {
-                        Some(k) => crate::crypto::wrap(&k, &text).unwrap_or(text),
+                        Some(k) => match crate::crypto::wrap(&k, &text) {
+                            Some(v) => v,
+                            None => break, // 加密失败：断开，不发明文
+                        },
                         None => text,
                     };
                     if socket.send(Message::Text(out.into())).await.is_err() {

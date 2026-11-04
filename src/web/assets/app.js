@@ -434,6 +434,7 @@
   }
 
   var state = {
+    fatal: false,
     connected: false,
     ended: false,
     intervalSec: 5,
@@ -545,6 +546,13 @@
       setStatus('warn', '链接无效，请重新扫码');
       return;
     }
+    // 远程模式（https）必须带 #k= 密钥：服务端会拒绝未加密的连接。
+    // 直接在这里说清楚，比连上去再被踢掉友好。
+    if (IS_REMOTE && !CRYPTO_KEY) {
+      state.fatal = true;
+      setStatus('warn', '链接不完整（缺少加密密钥），请重新扫码');
+      return;
+    }
 
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var url =
@@ -577,6 +585,11 @@
       } catch (e) {
         return;
       }
+      if (msg && msg.type === 'error' && msg.reason === 'enc_required') {
+        state.fatal = true;
+        setStatus('warn', '远程模式要求加密连接，请重新扫码');
+        return;
+      }
       if (msg && msg.type === 'enc') {
         if (!CRYPTO_KEY) return;
         var iv;
@@ -605,6 +618,11 @@
     ws.onclose = function () {
       state.connected = false;
       if (state.ended) return;
+      if (state.fatal) {
+        // 密钥缺失 / 被服务端拒绝：重连也没用，别让页面一直转
+        updateSendButton();
+        return;
+      }
       setStatus('warn', '连接断开，正在重连…');
       updateSendButton();
       scheduleReconnect();
@@ -616,7 +634,7 @@
   }
 
   function scheduleReconnect() {
-    if (state.ended || reconnectTimer) return;
+    if (state.ended || state.fatal || reconnectTimer) return;
     var delay = Math.min(8000, 800 * Math.pow(1.6, state.retry));
     state.retry = Math.min(state.retry + 1, 8);
     if (state.retry >= 5) {
@@ -1028,6 +1046,15 @@
     setTimeout(layoutColors, 80);
   });
   window.addEventListener('load', layoutColors);
+
+  // 底部说明随连接模式变化：远程模式确实经过 Cloudflare，不能再说"不经过第三方"
+  (function initTinyNote() {
+    var note = document.getElementById('tinyNote');
+    if (!note) return;
+    note.textContent = IS_REMOTE
+      ? '远程模式：消息经 Cloudflare 中继，内容端到端加密，中继看不到正文。'
+      : '消息只在现场局域网内传递，不经过任何第三方服务器。';
+  })();
 
   // 只有「远程模式 + 微信」才提示：局域网 IP 不会触发备案拦截
   if (IS_WECHAT && IS_REMOTE) {
