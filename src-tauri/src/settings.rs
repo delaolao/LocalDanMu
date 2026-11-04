@@ -1,4 +1,4 @@
-﻿//! 设置项存储。
+//! 设置项存储。
 //!
 //! 与旧版 `src/main/store.js` **逐键对齐**：同样的键名（camelCase）、同样的取值范围、
 //! 同样的默认值、同样的落盘格式。这样讲师从旧版升级上来，`settings.json` 能直接沿用，
@@ -194,6 +194,7 @@ pub fn resolve_data_dir() -> PathBuf {
 
     if let Some(dir) = &exe_dir {
         if dir.join("portable.txt").exists() && is_writable(dir) {
+            seed_portable_settings(dir);
             return dir.clone();
         }
     }
@@ -204,6 +205,29 @@ pub fn resolve_data_dir() -> PathBuf {
     let dir = base.join("local-danmu");
     let _ = fs::create_dir_all(&dir);
     dir
+}
+
+/// 绿色版第一次运行时，如果旁边还没有 settings.json，就把 `%APPDATA%\local-danmu\settings.json`
+/// 复制过来。
+///
+/// 起因：讲师可能先在安装版里配好了固定隧道（令牌 + 域名），换成绿色版后配置全空，
+/// 远程模式悄悄退化成"临时隧道"——地址每次变、还容易建不起来，排查起来很费解。
+/// 只在**目标文件不存在**时复制一次，之后完全以绿色版自己的为准。
+fn seed_portable_settings(dir: &Path) {
+    let target = dir.join("settings.json");
+    if target.exists() {
+        return;
+    }
+    let Ok(appdata) = std::env::var("APPDATA") else {
+        return;
+    };
+    let src = PathBuf::from(appdata)
+        .join("local-danmu")
+        .join("settings.json");
+    if !src.exists() {
+        return;
+    }
+    let _ = fs::copy(&src, &target);
 }
 
 fn is_writable(dir: &Path) -> bool {

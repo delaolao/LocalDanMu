@@ -323,9 +323,17 @@ impl Tunnel {
                             me2.set(&app2, "running", Some(join), "隧道已就绪，手机用流量可访问");
                         }
                     }
-                    // 明显的失败信号
-                    if line.contains("failed to request quick Tunnel") || line.contains("ERR ") {
-                        me2.set(&app2, "error", None, "隧道建立失败，检查网络后重试");
+                    // 只有"确定建不起来"才算失败。
+                    // 之前的实现把任何含 "ERR " 的日志都当失败——可 cloudflared 在
+                    // 握手阶段经常先打几行 ERR 再自己重试成功，结果界面抢先报错，
+                    // 用户以为隧道挂了。真正的失败留给"进程退出"或 40 秒超时兜底。
+                    if line.contains("failed to request quick Tunnel") {
+                        me2.set(
+                            &app2,
+                            "error",
+                            None,
+                            "隧道建立失败：无法向 Cloudflare 申请临时地址",
+                        );
                     }
                 }
             }
