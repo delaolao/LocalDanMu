@@ -1,4 +1,4 @@
-//! 远程模式：用 Cloudflare Tunnel 把本机的会话服务暴露到公网，
+﻿//! 远程模式：用 Cloudflare Tunnel 把本机的会话服务暴露到公网，
 //! 让学员在场地 WiFi 不可用时，用手机流量也能进入。
 //!
 //! 两种形态：临时隧道（Quick Tunnel，地址随机）与固定隧道（Named Tunnel，令牌 + 自有域名）。
@@ -308,11 +308,12 @@ impl Tunnel {
         let frag = frag.clone();
         let url_re = regex::Regex::new(r"https://[a-z0-9-]+\.trycloudflare\.com").unwrap();
 
+        let tail_exit = Arc::clone(&tail_buf);
         let tail_in = Arc::clone(&tail_buf);
         let reader = std::thread::spawn(move || {
             let tail_buf = tail_in;
             let mut found = false;
-            let mut ready_url: Option<String> = None;
+            let mut pending_url: Option<String> = None;
             if let Some(err) = stderr {
                 for line in BufReader::new(err).lines().map_while(Result::ok) {
                     if !line.trim().is_empty() {
@@ -323,22 +324,42 @@ impl Tunnel {
                             }
                         }
                     }
-                    if !found && ready_url.is_none() {
-                        let maybe = if fixed {
-                            line.contains("Registered tunnel connection")
-                                .then(|| format!("https://{host}/j/{token}#k={frag}"))
+                    // 快速隧道：地址横幅比"注册成功"先出现，先记下来
+                    if !fixed && pending_url.is_none() {
+                        if let Some(m) = url_re.find(&line) {
+                            let base = m.as_str();
+                            let host_only = base
+                                .trim_start_matches("https://")
+                                .split('/')
+                                .next()
+                                .unwrap_or("");
+                            // 排除 api.trycloudflare.com：申请失败时日志里会带 API 地址
+                            if host_only != "api.trycloudflare.com"
+                                && host_only != "www.trycloudflare.com"
+                            {
+                                pending_url = Some(base.to_string());
+                                crate::core::probe_log(&format!(
+                                    "run: 拿到临时地址 {base}，等待连接器注册"
+                                ));
+                            }
+                        }
+                    }
+
+                    // 两种模式都以「连接器注册成功」为准：地址拿到 ≠ 隧道可用。
+                    // 之前快速隧道一看到地址就放行，注册失败时会给学员一个死地址。
+                    if !found && line.contains("Registered tunnel connection") {
+                        let join = if fixed {
+                            Some(format!("https://{host}/j/{token}#k={frag}"))
                         } else {
-                            url_re
-                                .find(&line)
-                                .map(|m| format!("{}/j/{token}#k={frag}", m.as_str()))
+                            pending_url
+                                .as_ref()
+                                .map(|b| format!("{b}/j/{token}#k={frag}"))
                         };
-                        if let Some(join) = maybe {
+                        if let Some(join) = join {
                             found = true;
-                            ready_url = Some(join.clone());
-                            // 不要在这里 break：读线程提前退出会关掉 stderr 管道，
-                            // cloudflared 再写日志就会失败退出。探测交给独立线程。
                             let me_p = Arc::clone(&me2);
                             let app_p = app2.clone();
+                            let tail_p = Arc::clone(&tail_buf);
                             std::thread::spawn(move || {
                                 let base = join.split("/j/").next().unwrap_or("").to_string();
                                 me_p.set(
@@ -347,17 +368,54 @@ impl Tunnel {
                                     None,
                                     "隧道已连上，正在确认公网入口可用…",
                                 );
-                                if !probe_public_entry(&base) {
-                                    me_p.set(
-                                        &app_p,
-                                        "error",
-                                        None,
-                                        "隧道已连接但公网入口尚未生效（疑似 1033），请稍后重试",
-                                    );
-                                    return;
+                                match probe_public_entry(&base) {
+                                    ProbeResult::Ready => {}
+                                    ProbeResult::Unreachable => {
+                                        {
+                                            let g = me_p.inner.lock().unwrap();
+                                            if g.child.is_none() || g.status != "starting" {
+                                                return;
+                                            }
+                                        }
+                                        me_p.set(
+                                            &app_p,
+                                            "running",
+                                            Some(join.clone()),
+                                            "隧道已就绪（本机无法自测，已按连接器状态放行）",
+                                        );
+                                        return;
+                                    }
+                                    ProbeResult::NotReady(code) => {
+                                        let tail =
+                                            tail_p.lock().map(|g| g.clone()).unwrap_or_default();
+                                        let joined = tail.join("\n").to_lowercase();
+                                        let msg = if joined.contains("register tunnel error")
+                                            || joined.contains("initial tunnel connection failed")
+                                            || joined.contains("context deadline exceeded")
+                                        {
+                                            "隧道连不上 Cloudflare 边缘（control stream 超时）。建议改用固定域名隧道，或换网络后重试"
+                                        } else if joined.contains("not valid")
+                                            || joined.contains("unauthorized")
+                                        {
+                                            "隧道令牌无效或已失效，请重新复制令牌"
+                                        } else {
+                                            "隧道已连接但公网入口尚未生效，请稍后重试"
+                                        };
+                                        crate::core::probe_log(&format!(
+                                            "probe_public_entry: 失败 HTTP {code}"
+                                        ));
+                                        me_p.set(&app_p, "error", None, msg);
+                                        return;
+                                    }
                                 }
                                 if me_p.stopped.load(Ordering::SeqCst) {
                                     return;
+                                }
+                                {
+                                    let g = me_p.inner.lock().unwrap();
+                                    if g.child.is_none() || g.status != "starting" {
+                                        return;
+                                    }
                                 }
                                 let msg = if fixed {
                                     "固定隧道已连接，地址不会变"
@@ -372,7 +430,8 @@ impl Tunnel {
                     // 之前的实现把任何含 "ERR " 的日志都当失败——可 cloudflared 在
                     // 握手阶段经常先打几行 ERR 再自己重试成功，结果界面抢先报错，
                     // 用户以为隧道挂了。真正的失败留给"进程退出"或 40 秒超时兜底。
-                    if line.contains("failed to request quick Tunnel") {
+                    let lower = line.to_lowercase();
+                    if lower.contains("failed to request quick tunnel") {
                         me2.set(
                             &app2,
                             "error",
@@ -464,7 +523,19 @@ impl Tunnel {
             let status = g.status.clone();
             drop(g);
             if status == "running" || status == "starting" {
-                me4.set(&app4, "error", None, "隧道进程意外退出");
+                let tail = tail_exit.lock().map(|g| g.clone()).unwrap_or_default();
+                let joined = tail.join("\n").to_lowercase();
+                let msg = if joined.contains("register tunnel error")
+                    || joined.contains("initial tunnel connection failed")
+                    || joined.contains("context deadline exceeded")
+                {
+                    "隧道连不上 Cloudflare 边缘（control stream 超时）。建议改用固定域名隧道，或换网络后重试"
+                } else if joined.contains("not valid") || joined.contains("unauthorized") {
+                    "隧道令牌无效或已失效，请重新复制令牌"
+                } else {
+                    "隧道进程意外退出"
+                };
+                me4.set(&app4, "error", None, msg);
                 me4.schedule_restart();
             }
         });
@@ -647,12 +718,29 @@ const ASSET_NAME: &str = "cloudflared-windows-amd64.exe";
 ///
 /// Cloudflare 侧从"连接器注册成功"到"域名真正能路由"有几秒延迟，
 /// 这段时间内访问就是 1033。最多等 ~12 秒，2 秒一次。
-fn probe_public_entry(base: &str) -> bool {
+/// 公网入口探测结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeResult {
+    /// 拿到 200，入口可用
+    Ready,
+    /// 有 HTTP 响应但不是 200（502/530/1033…），说明隧道没接上
+    NotReady(u16),
+    /// 完全连不上 / DNS 解析不了：多半是本机到该域名的链路被拦
+    /// （实测 `*.trycloudflare.com` 直连 DNS 直接失败），不能据此判定隧道有问题
+    Unreachable,
+}
+
+/// 探测公网入口是否真的可用（`{base}/healthz` 返回 200）。
+///
+/// Cloudflare 侧从"连接器注册成功"到"域名真正能路由"有几秒延迟，这段时间访问就是 1033。
+/// 但要注意：本机可能根本到不了这个域名（DNS 被污染），那是**不可判定**，不是失败。
+fn probe_public_entry(base: &str) -> ProbeResult {
     if base.is_empty() {
-        return true; // 解析不出来就别拦着用户
+        return ProbeResult::Ready; // 解析不出来就别拦着用户
     }
     let url = format!("{base}/healthz");
-    for attempt in 1..=6 {
+    let mut last_status: Option<u16> = None;
+    for attempt in 1..=6u32 {
         if attempt > 1 {
             std::thread::sleep(Duration::from_secs(2));
         }
@@ -670,19 +758,30 @@ fn probe_public_entry(base: &str) -> bool {
             ])
             .creation_flags(0x0800_0000)
             .output();
-        if let Ok(out) = out {
-            if String::from_utf8_lossy(&out.stdout).trim() == "200" {
+        match out {
+            Ok(o) if o.status.success() => {
+                let code = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if code == "200" {
+                    crate::core::probe_log(&format!("probe_public_entry: 就绪（第 {attempt} 次）"));
+                    return ProbeResult::Ready;
+                }
+                last_status = code.parse::<u16>().ok();
                 crate::core::probe_log(&format!(
-                    "probe_public_entry: {url} 已就绪（第 {attempt} 次）"
+                    "probe_public_entry: 第 {attempt} 次返回 HTTP {code}"
                 ));
-                return true;
+            }
+            _ => {
+                crate::core::probe_log(&format!(
+                    "probe_public_entry: 第 {attempt} 次连不上（本机链路不可达）"
+                ));
             }
         }
-        crate::core::probe_log(&format!("probe_public_entry: 第 {attempt} 次未就绪"));
     }
-    false
+    match last_status {
+        Some(code) => ProbeResult::NotReady(code),
+        None => ProbeResult::Unreachable,
+    }
 }
-
 /// 进程内缓存一份官方哈希：同一次启动里多处校验都复用它，避免反复请求 API。
 /// 只缓存成功结果——取不到（离线）时下次还能再试。
 fn expected_sha256_cached() -> Option<String> {
