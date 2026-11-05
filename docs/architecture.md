@@ -1,4 +1,4 @@
-# 培训弹幕 · 实现文档（Tauri 版 v0.3.5）
+﻿# 培训弹幕 · 实现文档（Tauri 版 v0.3.5）
 
 > 覆盖范围：局域网模式 + **远程模式**（Cloudflare 隧道 + 端到端加密）。
 > 远程模式的完整使用说明见 `docs/remote-tunnel.md`；本文讲**实现**与**为什么这么写**。
@@ -86,7 +86,7 @@ Rust 进程里，靠 tokio 任务和 channel 通信，不存在跨进程 IPC 序
                            │
         ┌──────────────────┴──────────────────────┐
         │   tokio 运行时：axum HTTP + WebSocket    │
-        │   监听 0.0.0.0:8080（占用则 8081…）      │
+        │   监听 0.0.0.0:18080（固定，占用则报错）  │
         └──────────────────▲──────────────────────┘
                            │ WebSocket（同一局域网）
         ┌──────────────────┴──────────────────────┐
@@ -498,7 +498,7 @@ main()
  │   ├─ 6. create_tray / register_shortcuts / 托盘 tick
  │   └─ 7. 后台任务：
  │         start_session()
- │           ├─ pickPort(8080…)  先探 127.0.0.1 再绑 0.0.0.0
+ │           ├─ 固定 18080：先探 127.0.0.1 再绑 0.0.0.0
  │           ├─ random_token(8)  房间口令
  │           ├─ network::pick()  选网卡
  │           ├─ Bridge::start()  起 HTTP + WS
@@ -566,7 +566,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\probe-app.ps1 -Exe "
 | --- | --- | --- | --- |
 | 1 | 设了不抢焦点，点一下图片还是把前台焦点抢走 | tao 在 WebView2 初始化完成时把创建时缓存的 `ex_style` 整体写回，追加的 `WS_EX_NOACTIVATE` 被抹掉（实测 `0x08040198 → 0x000c0138`） | `apply_overlay_style` 作为唯一真相来源，350ms 复核自愈 |
 | 2 | 只切 `WS_EX_TRANSPARENT` 后点击不再穿透 | 点击穿透需要 `LAYERED \| TRANSPARENT` 同时在场；改由自己管样式后 `LAYERED` 被清掉 | `LAYERED` 常开，只切 `TRANSPARENT` |
-| 3 | 二维码能扫，但本机 `127.0.0.1:8080` 打不开 | Windows 上 `0.0.0.0:8080` 与别人已占用的 `127.0.0.1:8080` **可以同时 Listen**，本机流量被具体的那个接走 | 端口探测先试 `127.0.0.1:port`，可用再绑通配地址 |
+| 3 | 二维码能扫，但本机 `127.0.0.1:18080` 打不开 | Windows 上 `0.0.0.0:18080` 与别人已占用的 `127.0.0.1:18080` **可以同时 Listen**，本机流量被具体的那个接走 | 端口探测先试 `127.0.0.1:port`，可用再绑通配地址 |
 | 4 | 一条消息在"最近弹幕"里出现三次、其中一条空白 | `emit_to(label, ...)` 实测会发给所有 webview，而完整消息与精简副本字段形状不同 | 拆成 `dm:item` 与 `dm:item-full` 两个事件名 |
 | 5 | release 版探针"透明/穿透"假失败 | 程序在非回环地址监听触发 Windows 防火墙对话框，**整个桌面被变暗且输入被独占** | 探针用 `LDM_BIND=127.0.0.1`；真实用户首次运行需在防火墙弹窗点"允许" |
 | 6 | `cargo tauri build` 卡在下载 NSIS | GitHub 直连超时 | `scripts\setup-nsis.ps1` 预置 NSIS 3.13 + `nsis_tauri_utils.dll v0.5.3`（bundler 靠这个 dll 判断本地工具链可用，缺了会删目录重下） |

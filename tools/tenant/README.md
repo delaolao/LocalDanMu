@@ -85,7 +85,7 @@ node tools/tenant/provision.js --label "张三-2026春季" --host u7f3k2
 
 ## 改服务端口（不重建隧道）
 
-固定隧道的入口规则（Public Hostname → `http://localhost:8080`）存在 Cloudflare 侧，
+固定隧道的入口规则（Public Hostname → `http://localhost:18080`）存在 Cloudflare 侧，
 本机换端口必须同步改它。用这条命令改，**隧道不重建、令牌不变**，对方不用重新填：
 
 ```powershell
