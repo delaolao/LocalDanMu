@@ -238,6 +238,19 @@ node tools/tenant/provision.js --label "张三-2026春季" --host zhangsan
 
 对方填进「设置与网络 → 固定隧道」，点开启即可。
 
+### 改端口（隧道不重建、令牌不变）
+
+Windows 有时会把 8000 段端口保留起来（`netsh int ipv4 show excludedportrange protocol=tcp` 能看到），
+程序绑不上 8080 就会退回随机端口，而隧道入口还指着 8080 —— 表现为 502 / 「入口尚未生效」。
+
+改入口（不用重新开通，对方令牌继续有效）：
+
+```powershell
+node tools/tenant/port.js --host syklong.teachergeng.space --port 18080
+```
+
+改完把程序「设置与网络 → 服务端口」也填同一个值，重启程序。建议用 18080 这类高位端口。
+
 ### 查看与吊销
 
 ```powershell

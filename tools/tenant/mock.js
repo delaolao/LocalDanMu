@@ -50,7 +50,14 @@ function startMock() {
         return ok(state.tunnelToken);
       }
       if (u.endsWith(`/cfd_tunnel/${state.tunnelId}/configurations`) && req.method === 'PUT') {
+        state.ingress = JSON.parse(body).config.ingress;
         return ok({});
+      }
+      if (u.endsWith(`/cfd_tunnel/${state.tunnelId}/configurations`) && req.method === 'GET') {
+        return ok({ config: { ingress: state.ingress || [] } });
+      }
+      if (u.endsWith('/cfd_tunnel') && req.method === 'GET') {
+        return ok([{ id: state.tunnelId, name: 'ldm-user-mock', created_at: new Date().toISOString() }]);
       }
       if (u.endsWith('/dns_records') && req.method === 'POST') return ok({ id: state.dnsId });
       if (u.endsWith(`/dns_records/${state.dnsId}`) && req.method === 'DELETE') {

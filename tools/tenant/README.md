@@ -83,6 +83,20 @@ node tools/tenant/provision.js --label "张三-2026春季" --host u7f3k2
 
 把这两行私聊发给对方，让他填进「设置与网络 → 固定隧道」。
 
+## 改服务端口（不重建隧道）
+
+固定隧道的入口规则（Public Hostname → `http://localhost:8080`）存在 Cloudflare 侧，
+本机换端口必须同步改它。用这条命令改，**隧道不重建、令牌不变**，对方不用重新填：
+
+```powershell
+node tools/tenant/port.js --host syklong.teachergeng.space --port 18080
+node tools/tenant/port.js --label "宋亚科-永久" --port 18080
+```
+
+台账里没有这条记录时会直接去 Cloudflare 按域名反查。
+
+> 也可以到控制台手改：Tunnels → 那条隧道 → Public Hostname → 编辑。
+
 ## 吊销
 
 ```powershell
