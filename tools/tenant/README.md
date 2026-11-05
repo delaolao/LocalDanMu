@@ -86,10 +86,15 @@ node tools/tenant/provision.js --label "张三-2026春季" --host u7f3k2
 ## 查隧道令牌
 
 ```powershell
-node tools/tenant/token.js --host syklong.teachergeng.space
+node tools/tenant/token.js --list                              # 只读本地台账，不需令牌
+node tools/tenant/token.js --host syklong.teachergeng.space    # 查某个域名（需 API 令牌）
 ```
 
-输出该隧道的 `eyJ...` 令牌（讲师填进程序的那串）。台账里没有时会按域名去 Cloudflare 反查。
+`--host` 会调 Cloudflare 的 `GET .../cfd_tunnel/<id>/token`，打印 `eyJ...` 令牌。
+台账里没有时会按域名反查隧道；`--label` 仅在标签唯一时可用（重名会提示改用 `--host`）。
+
+API 令牌来源优先级：`$env:CF_API_TOKEN` → 网页版保存过的
+`%LOCALAPPDATA%\localdanmu\tenant-api-token.txt`。
 
 > 也可以到控制台看：Zero Trust → Networks → Tunnels → 该隧道 → 详情页的 connector 安装命令里带 `--token`。
 
