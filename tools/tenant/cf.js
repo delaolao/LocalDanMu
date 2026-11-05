@@ -139,6 +139,7 @@ async function deleteTunnel(accountId, tunnelId) {
 }
 
 module.exports = {
+  call,
   resolveAccountId,
   resolveZone,
   resolveZoneId,

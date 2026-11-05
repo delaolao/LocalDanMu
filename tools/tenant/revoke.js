@@ -15,7 +15,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cf = require('./cf');
 
-const STORE = path.join(__dirname, 'tenants.json');
+// 允许用环境变量指定存储位置：自测/体验模式必须指向临时文件，
+// 绝不能写坏真实记录（这个坑踩过一次，恢复很麻烦）
+const STORE = process.env.LDM_TENANT_STORE || path.join(__dirname, 'tenants.json');
 
 function arg(name) {
   const i = process.argv.indexOf(`--${name}`);

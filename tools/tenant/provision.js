@@ -19,7 +19,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cf = require('./cf');
 
-const STORE = path.join(__dirname, 'tenants.json');
+// 允许用环境变量指定存储位置：自测/体验模式必须指向临时文件，
+// 绝不能写坏真实记录（这个坑踩过一次，恢复很麻烦）
+const STORE = process.env.LDM_TENANT_STORE || path.join(__dirname, 'tenants.json');
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -62,6 +64,13 @@ function randomSuffix(len = 6) {
   // 想要分组前缀，得买 Advanced Certificate Manager 签发 `*.dm.zone`。
   const hostname = sub.includes('.') ? sub : `${sub}.${zoneName}`;
   const dryRun = has('dry-run');
+  const servicePort = Number(arg('port', '8080'));
+  if (!Number.isInteger(servicePort) || servicePort < 1024 || servicePort > 65535) {
+    console.error('--port 要在 1024–65535 之间');
+    process.exitCode = 1;
+    return;
+  }
+  const service = `http://localhost:${servicePort}`;
   const checkOnly = has('check');
 
   console.log(`账号 zone : ${zoneName}`);
@@ -104,7 +113,7 @@ function randomSuffix(len = 6) {
   console.log(`ok (${tunnel.id})`);
 
   process.stdout.write('[2/3] 配置入口规则 … ');
-  await cf.setIngress(accountId, tunnel.id, hostname, 'http://localhost:8080');
+  await cf.setIngress(accountId, tunnel.id, hostname, service);
   console.log('ok');
 
   process.stdout.write('[3/3] 创建 DNS 记录 … ');
@@ -118,6 +127,7 @@ function randomSuffix(len = 6) {
     tunnelName,
     tunnelId: tunnel.id,
     dnsRecordId,
+    servicePort,
     zoneName,
     zoneId,
     accountId,

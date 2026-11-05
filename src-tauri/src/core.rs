@@ -183,13 +183,23 @@ impl AppCore {
             interval_sec: settings.interval_sec,
             filter: Some(filter),
             sink,
-            preferred_port: 8080,
+            preferred_port: settings.port,
             remote_key: Arc::clone(&self.remote_key),
         })
         .await
         .map_err(|e| format!("服务启动失败：{e}"))?;
 
         let port = bridge.port;
+        // 端口对不上会让固定隧道指向一个没人监听的端口（表现为 502 / 「入口尚未生效」）
+        if settings.port != 0 && port != settings.port {
+            self.push_warning(
+                "error",
+                &format!(
+                    "{} 端口用不了，服务已改用 {}；如果用的是固定隧道，请把隧道入口也改成 {}",
+                    settings.port, port, port
+                ),
+            );
+        }
         let url = bridge.url(&ip);
         {
             let mut s = self.session.lock().map_err(|_| "会话状态损坏")?;

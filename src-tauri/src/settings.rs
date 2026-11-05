@@ -1,4 +1,4 @@
-//! 设置项存储。
+﻿//! 设置项存储。
 //!
 //! 与旧版 `src/main/store.js` **逐键对齐**：同样的键名（camelCase）、同样的取值范围、
 //! 同样的默认值、同样的落盘格式。这样讲师从旧版升级上来，`settings.json` 能直接沿用，
@@ -22,6 +22,8 @@ use serde_json::{json, Value};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    /// 服务监听端口（固定隧道要求它和隧道入口一致）
+    pub port: u16,
     /// 每人发送间隔（秒）
     pub interval_sec: u32,
     /// 弹幕字号
@@ -66,6 +68,7 @@ pub const FILTER_LEVELS: [&str; 3] = ["off", "mark", "block"];
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            port: 8080,
             interval_sec: 5,
             font_px: 38,
             speed: 8,
@@ -126,6 +129,9 @@ impl Settings {
         for (key, value) in obj {
             let before = serde_json::to_value(&*self).unwrap_or(Value::Null);
             match key.as_str() {
+                "port" => {
+                    self.port = clamp_u32(value, 1024, 65535, d.port as u32) as u16;
+                }
                 "intervalSec" => self.interval_sec = clamp_u32(value, 1, 60, d.interval_sec),
                 "fontPx" => self.font_px = clamp_u32(value, 20, 72, d.font_px),
                 "speed" => self.speed = clamp_u32(value, 4, 30, d.speed),
@@ -330,6 +336,7 @@ fn spawn_writer(path: PathBuf, rx: Receiver<()>, store: std::sync::Weak<Store>) 
 /// 给前端用的「设置 + 默认值」快照，字段名与旧版 buildState().config 一致。
 pub fn settings_to_json(s: &Settings) -> Value {
     json!({
+        "port": s.port,
         "intervalSec": s.interval_sec,
         "fontPx": s.font_px,
         "speed": s.speed,

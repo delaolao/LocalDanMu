@@ -214,6 +214,8 @@
     setControl('ssidInput', cfg.wifiSsid || '');
     setControl('pwdInput', cfg.wifiPassword || '');
     setControl('filterSel', cfg.filterLevel || 'block');
+    setControl('portInput', cfg.port || 8080);
+    setText('portHint', String(cfg.port || 8080));
     setControl('tunnelHostInput', cfg.tunnelHost || '');
     const noFixed = !(cfg.tunnelToken || '').trim();
     const remoteNote = $('remoteNote');
@@ -437,6 +439,16 @@
       })
     );
   }
+
+  $('portInput').addEventListener('change', (event) => {
+    const v = Number(event.target.value);
+    if (!v || v < 1024 || v > 65535) {
+      toast('端口要在 1024–65535 之间');
+      return;
+    }
+    guard(api.setConfig({ port: v }));
+    setText('portHint', String(v));
+  });
 
   $('tunnelHostInput').addEventListener('blur', saveTunnel);
   $('tunnelTokenInput').addEventListener('blur', saveTunnel);

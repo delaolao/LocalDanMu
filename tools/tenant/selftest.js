@@ -1,9 +1,11 @@
 ﻿const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { startMock } = require('./mock');
 
-const STORE = path.join(__dirname, 'tenants.json');
+// 自测永远用临时文件，绝不碰 tools/tenant/tenants.json（真实记录）
+const STORE = path.join(os.tmpdir(), `ldm-tenant-selftest-${process.pid}.json`);
 
 const mock = startMock();
 const TUNNEL_ID = mock.state.tunnelId;
@@ -16,7 +18,8 @@ function run(script, args) {
         ...process.env,
         CF_API_TOKEN: 'fake-token',
         CF_API_BASE: `http://127.0.0.1:${port}`,
-        CF_ZONE_NAME: 'teachergeng.space'
+        CF_ZONE_NAME: 'teachergeng.space',
+        LDM_TENANT_STORE: STORE
       },
       stdio: 'inherit'
     });

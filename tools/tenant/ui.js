@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * TENANT 的本地网页版：浏览器里填表开通，省得记命令行参数。
  *
@@ -18,7 +18,9 @@ const { exec } = require('node:child_process');
 const useMock = process.argv.includes('--mock');
 const noOpen = process.argv.includes('--no-open');
 
-const STORE = path.join(__dirname, 'tenants.json');
+// 允许用环境变量指定存储位置：自测/体验模式必须指向临时文件，
+// 绝不能写坏真实记录（这个坑踩过一次，恢复很麻烦）
+const STORE = process.env.LDM_TENANT_STORE || path.join(__dirname, 'tenants.json');
 const TOKEN_FILE = path.join(
   process.env.LOCALAPPDATA || os.homedir(),
   'localdanmu',
@@ -103,13 +105,18 @@ function getCf() {
   return cfModule;
 }
 
-async function provision(label, host) {
+async function provision(label, host, port) {
   const cf = getCf();
   const sub = (host || '').trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]{1,40}$/.test(sub)) {
     throw new Error('域名标识只能用字母数字和连字符，且不能以连字符开头');
   }
   const hostname = `${sub}.${ZONE_NAME}`;
+  const servicePort = Number(port) || 8080;
+  if (!Number.isInteger(servicePort) || servicePort < 1024 || servicePort > 65535) {
+    throw new Error('服务端口要在 1024–65535 之间');
+  }
+  const service = `http://localhost:${servicePort}`;
   const store = loadStore();
   if ((store.tenants || []).some((t) => t.hostname === hostname)) {
     throw new Error(`${hostname} 已经开通过了`);
@@ -126,7 +133,7 @@ async function provision(label, host) {
   const tunnelName = `ldm-${slug}-${randomId(4)}`;
 
   const tunnel = await cf.createTunnel(accountId, tunnelName);
-  await cf.setIngress(accountId, tunnel.id, hostname, SERVICE);
+  await cf.setIngress(accountId, tunnel.id, hostname, service);
   const dnsRecordId = await cf.createDnsRecord(zone.id, hostname, tunnel.id);
 
   store.tenants = store.tenants || [];
@@ -136,6 +143,7 @@ async function provision(label, host) {
     tunnelName,
     tunnelId: tunnel.id,
     dnsRecordId,
+    servicePort,
     zoneName: ZONE_NAME,
     zoneId: zone.id,
     accountId,
@@ -218,9 +226,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (u === '/api/provision' && req.method === 'POST') {
-      const { label, host } = await readBody(req);
+      const { label, host, port } = await readBody(req);
       if (!label || !label.trim()) throw new Error('标签不能为空');
-      const out = await provision(label.trim(), host);
+      const out = await provision(label.trim(), host, port);
       return json(res, 200, { ok: true, ...out });
     }
 
@@ -314,6 +322,8 @@ const PAGE = `<!doctype html>
   <div class="card">
     <h2>② 开通新讲师</h2>
     <p class="hint">标签只给自己看（方便回头找人）；域名标识会拼成 <code>&lt;标识&gt;.teachergeng.space</code>，可以改。</p>
+    <p class="hint" style="color:var(--warn)">服务端口默认 8080。如果对方电脑上 8080 用不了（比如被系统保留），
+      要在这里和程序设置里填同一个别的端口（如 18080）。</p>
     <label>标签</label>
     <input id="label" placeholder="例如：张三-2026春季">
     <label>域名标识</label>
@@ -321,6 +331,8 @@ const PAGE = `<!doctype html>
       <input id="host" placeholder="例如：zhangsan">
       <button class="ghost" id="regen" title="换一个随机标识">🎲 换一个</button>
     </div>
+    <label>服务端口（要和程序「设置与网络 → 服务端口」一致）</label>
+    <input id="port" type="number" min="1024" max="65535" value="8080">
     <div class="preview" id="preview">—</div>
     <div style="margin-top:14px"><button id="go">开通</button></div>
 
@@ -443,7 +455,7 @@ $('go').onclick = async () => {
   btn.disabled = true;
   btn.textContent = '开通中…';
   try {
-    const r = await api('/api/provision', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ label, host }) });
+    const r = await api('/api/provision', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ label, host, port: Number($('port').value) }) });
     $('resHost').textContent = r.hostname;
     $('resToken').textContent = r.token;
     $('result').classList.add('show');
@@ -492,7 +504,10 @@ api('/api/state').then((s) => { state = s; render(); updatePreview(); }).catch((
       server.listen(port, '127.0.0.1', () => resolve(port));
     });
 
-  let port = 7788;
+  // 端口挑在 17000 段：Windows 的"保留端口"经常落在 7000–9000（Hyper-V/WSL 会动态占用），
+  // 7788 这种常见端口反而容易绑定失败。
+  server.setMaxListeners(0);
+  let port = 17888;
   for (let i = 0; i < 20; i += 1) {
     try {
       await start(port);

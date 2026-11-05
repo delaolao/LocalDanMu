@@ -521,7 +521,12 @@
   function flashSent() {
     els.send.textContent = '已发送 ✓';
     if (resetLabelTimer) clearTimeout(resetLabelTimer);
-    resetLabelTimer = setTimeout(updateSendButton, 1200);
+    // 这里必须直接把文字改回去：updateSendButton 里有
+    // `if (textContent !== '已发送 ✓')` 的保护，靠它自己是不会还原的
+    resetLabelTimer = setTimeout(function () {
+      if (els.send.textContent === '已发送 ✓') els.send.textContent = '发送';
+      updateSendButton();
+    }, 1200);
   }
 
   function updateSendButton() {

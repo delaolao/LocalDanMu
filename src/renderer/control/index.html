@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN" data-theme="system">
   <head>
     <meta charset="utf-8" />
@@ -148,6 +148,12 @@
           <label>现场 WiFi（显示在投屏引导页）</label>
           <input type="text" id="ssidInput" maxlength="32" placeholder="WiFi 名称，例如 Training-5G" autocomplete="off" />
           <input type="text" id="pwdInput" maxlength="64" placeholder="WiFi 密码，留空则不显示" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label>服务端口 <span class="val" id="portHint">8080</span></label>
+          <input type="number" id="portInput" min="1024" max="65535" step="1" placeholder="8080" />
+          <p class="hint-text">固定隧道会写死这个端口，两边必须一致。改了要重启程序生效。</p>
         </div>
 
         <div class="field">
