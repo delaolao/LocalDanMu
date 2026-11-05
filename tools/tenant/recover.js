@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * TENANT：从 Cloudflare 侧恢复 tenants.json。
  *
@@ -44,7 +44,7 @@ function shortId(s) {
   const rebuilt = [];
   for (const t of mine) {
     let hostname = '';
-    let servicePort = 8080;
+    let servicePort = 18080; // 程序端口固定，解析不出来就按默认值
     try {
       const cfg = await cf.call('GET', `/accounts/${accountId}/cfd_tunnel/${t.id}/configurations`);
       const ingress = (cfg && cfg.config && cfg.config.ingress) || [];

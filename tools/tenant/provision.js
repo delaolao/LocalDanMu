@@ -8,9 +8,9 @@
  *
  * 做的事：
  *   1. 在账号下建一条隧道 ldm-<label>-<rand>
- *   2. 配置入口规则：<host>.dm.<zone> → http://localhost:8080
+ *   2. 配置入口规则：<host>.<zone> → http://localhost:18080（端口固定）
  *   3. 建 CNAME 记录指向 <tunnel-id>.cfargotunnel.com
- *   4. 把结果写进 tools/tenant/tenants.json（含隧道令牌，切勿外传）
+ *   4. 把结果写进 tools/tenant/tenants.json（**不含令牌**，令牌只在屏幕上打印一次）
  *
  * 注意：隧道令牌是凭据。一个人一把，泄露只影响他自己，删掉隧道即可吊销。
  */
@@ -79,7 +79,7 @@ function randomSuffix(len = 6) {
   if (dryRun) {
     console.log('\n[dry-run] 将要执行：');
     console.log('  1. POST /accounts/<id>/cfd_tunnel  { name: ldm-…, config_src: cloudflare }');
-    console.log(`  2. PUT  /accounts/<id>/cfd_tunnel/<tid>/configurations → ${hostname} → http://localhost:8080`);
+    console.log(`  2. PUT  /accounts/<id>/cfd_tunnel/<tid>/configurations → ${hostname} → ${service}`);
     console.log(`  3. POST /zones/<zid>/dns_records  CNAME ${hostname} → <tid>.cfargotunnel.com`);
     console.log('  4. 写入 tools/tenant/tenants.json');
     return;

@@ -460,6 +460,8 @@ impl Tunnel {
                                             "probe_public_entry: 失败 HTTP {code}"
                                         ));
                                         me_p.set(&app_p, "error", None, msg);
+                                        // 先回收旧连接器：不开自动续连时，它会一直挂在后台占着入口
+                                        me_p.drop_child();
                                         // 瞬态 1033 正适合交给自动续连，而不是停在原地等讲师点重试
                                         me_p.schedule_restart();
                                         return;
@@ -625,6 +627,23 @@ impl Tunnel {
         if was != "idle" {
             let _ = self.app.emit(EVENT, self.snapshot());
         }
+    }
+
+    /// 只回收子进程，不改 `stopped` 状态。
+    ///
+    /// 用在「已经进入 error、但不打算自动续连」的场景：界面报错了，
+    /// 旧连接器就不该继续挂在后台占着公网入口。
+    fn drop_child(&self) {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(mut child) = g.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        #[cfg(windows)]
+        {
+            g.job = None;
+        }
+        crate::crypto::set_key(&self.key, None);
     }
 
     /// 应用退出时确保子进程被清掉，不留孤儿
@@ -813,6 +832,7 @@ impl Tunnel {
                                 None,
                                 "公网入口连续 3 次不可用（1033/502），正在尝试恢复",
                             );
+                            me.drop_child();
                             me.schedule_restart();
                             break;
                         }

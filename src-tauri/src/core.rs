@@ -111,42 +111,116 @@ pub struct AppCore {
 ///
 /// 返回 true 表示已经处理掉了。别人的进程一律不动：那可能是讲师正在用的软件，
 /// 悄悄杀掉比启动失败更糟。
+/// 找出正在监听指定端口（IPv4/IPv6 都算）的进程 PID。
+///
+/// 用 `GetExtendedTcpTable` 而不是解析 `netstat`：这台机器上 netstat 连监听行都不显示，
+/// 而且它的输出格式受语言/版本影响，解析出来的结果不可信。
+#[cfg(windows)]
+fn listening_pid(port: u16) -> Option<u32> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
+        TCP_TABLE_OWNER_PID_LISTENER,
+    };
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+
+    fn query(port: u16, p_family: u32, table_class: i32) -> Vec<u32> {
+        let mut size: u32 = 0;
+        // 第一次问需要多大缓冲
+        unsafe {
+            GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 0, p_family, table_class, 0);
+        }
+        if size == 0 {
+            return Vec::new();
+        }
+        let mut buf = vec![0u8; size as usize];
+        let rc = unsafe {
+            GetExtendedTcpTable(
+                buf.as_mut_ptr().cast(),
+                &mut size,
+                0,
+                p_family,
+                table_class,
+                0,
+            )
+        };
+        if rc != 0 {
+            return Vec::new();
+        }
+
+        let mut pids = Vec::new();
+        unsafe {
+            if p_family == AF_INET as u32 {
+                let table = &*(buf.as_ptr() as *const MIB_TCPTABLE_OWNER_PID);
+                let rows =
+                    std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize);
+                for row in rows {
+                    // dwLocalPort 是网络字节序，取低 16 位再转主机序
+                    let p = u16::from_be((row.dwLocalPort & 0xffff) as u16);
+                    if p == port {
+                        pids.push(row.dwOwningPid);
+                    }
+                }
+            } else {
+                let table = &*(buf.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID);
+                let rows =
+                    std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize);
+                for row in rows {
+                    let p = u16::from_be((row.dwLocalPort & 0xffff) as u16);
+                    if p == port {
+                        pids.push(row.dwOwningPid);
+                    }
+                }
+            }
+        }
+        pids
+    }
+
+    let af_inet = AF_INET as u32;
+    let af_inet6 = AF_INET6 as u32;
+    let class = TCP_TABLE_OWNER_PID_LISTENER;
+    let mut all = query(port, af_inet, class);
+    all.extend(query(port, af_inet6, class));
+    all.into_iter().find(|pid| *pid != 0)
+}
+
+#[cfg(not(windows))]
+fn listening_pid(_port: u16) -> Option<u32> {
+    None
+}
+
+/// 进程名（小写）；取不到就返回空串
+fn process_name(pid: u32) -> String {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase())
+        .unwrap_or_default()
+        .split(',')
+        .next()
+        .unwrap_or("")
+        .trim_matches('"')
+        .to_string()
+}
+
+/// 占着端口的进程是谁——只结束我们自己的残留进程。
+///
+/// 返回 true 表示已经处理掉了。别人的进程一律不动：那可能是讲师正在用的软件，
+/// 悄悄杀掉比启动失败更糟。
 fn kill_stale_owner(port: u16) -> bool {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    let Ok(out) = std::process::Command::new("netstat")
-        .args(["-ano", "-p", "tcp"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    else {
-        return false;
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    let needle = format!("127.0.0.1:{port}");
-    let Some(line) = text
-        .lines()
-        .find(|l| l.contains(&needle) && l.contains("LISTENING"))
-    else {
-        return false;
-    };
-    let Some(pid) = line
-        .split_whitespace()
-        .last()
-        .and_then(|s| s.parse::<u32>().ok())
-    else {
+    let Some(pid) = listening_pid(port) else {
         return false;
     };
     if pid == std::process::id() {
         return false;
     }
-    let info = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase())
-        .unwrap_or_default();
-    if !info.contains("localdanmu") {
+    if !process_name(pid).contains("localdanmu") {
         return false;
     }
     crate::core::probe_log(&format!(
@@ -159,41 +233,11 @@ fn kill_stale_owner(port: u16) -> bool {
     true
 }
 
-/// 端口被占用时，尽量告诉用户是谁占的
 fn port_owner_hint(port: u16) -> String {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    let Ok(out) = std::process::Command::new("netstat")
-        .args(["-ano", "-p", "tcp"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    else {
+    let Some(pid) = listening_pid(port) else {
         return String::new();
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    let needle = format!("127.0.0.1:{port}");
-    let Some(line) = text
-        .lines()
-        .find(|l| l.contains(&needle) && l.contains("LISTENING"))
-    else {
-        return String::new();
-    };
-    let Some(pid) = line.split_whitespace().last() else {
-        return String::new();
-    };
-    let name = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
-    let name = name
-        .split(',')
-        .next()
-        .unwrap_or("")
-        .trim_matches('"')
-        .to_string();
+    let name = process_name(pid);
     format!("（占用者：{name}，PID {pid}）")
 }
 
@@ -922,6 +966,17 @@ impl MessageSink for CoreSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_pid_of_listening_port() {
+        // 回归：以前用 netstat 匹配 127.0.0.1:<port>，而程序绑的是 0.0.0.0，
+        // 而且这台机器上 netstat 根本不显示监听行 —— 改成 GetExtendedTcpTable 后必须能查到。
+        let listener = std::net::TcpListener::bind(("0.0.0.0", 0)).expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let pid = listening_pid(port);
+        assert_eq!(pid, Some(std::process::id()), "应当查到自己的 PID");
+        drop(listener);
+    }
 
     fn item(seq: u64, kind: &str) -> HistoryItem {
         HistoryItem {

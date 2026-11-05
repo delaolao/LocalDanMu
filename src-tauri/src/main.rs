@@ -148,7 +148,7 @@ fn main() {
                     eprintln!("[main] 会话启动失败: {err}");
                     core_bg.set_warnings(vec![json!({
                         "level": "error",
-                        "text": format!("{err}。请点「重新检测」重试，或检查端口是否被占用。"),
+                        "text": err.to_string(),
                         "action": "refresh"
                     })]);
                 }
@@ -804,7 +804,7 @@ async fn app_refresh_network(app: AppHandle) -> Value {
         core.set_warnings(vec![serde_json::json!({
             "level": "error",
             "text": format!("服务启动失败：{err}"),
-            "hint": "检查 8080 端口是否被占用，或点「重新检测」再试"
+            "hint": "检查 18080 端口是否被占用，或点「重新检测」再试"
         })]);
     }
     core.push_state();

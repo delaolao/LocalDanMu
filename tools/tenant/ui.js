@@ -392,8 +392,17 @@ function render() {
   }
   for (const t of state.tenants) {
     const li = document.createElement('li');
-    li.innerHTML = '<div><div>' + t.label + '</div><div class="hint" style="margin:0">' +
-      t.hostname + '</div></div>';
+    // 用 DOM 拼、文本用 textContent：label/hostname 来自输入或云端，不能当 HTML 解释
+    const wrap = document.createElement('div');
+    const nameEl = document.createElement('div');
+    nameEl.textContent = t.label;
+    const hostEl = document.createElement('div');
+    hostEl.className = 'hint';
+    hostEl.style.margin = '0';
+    hostEl.textContent = t.hostname;
+    wrap.appendChild(nameEl);
+    wrap.appendChild(hostEl);
+    li.appendChild(wrap);
     const btn = document.createElement('button');
     btn.className = 'danger';
     btn.textContent = '吊销';

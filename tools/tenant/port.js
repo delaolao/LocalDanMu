@@ -1,8 +1,8 @@
-'use strict';
+﻿'use strict';
 /**
  * TENANT：改一条已开通隧道的「服务端口」。
  *
- * 固定隧道的入口规则（Public Hostname → http://localhost:8080）存在 Cloudflare 侧，
+ * 固定隧道的入口规则（Public Hostname → http://localhost:18080）存在 Cloudflare 侧，
  * 本机换端口就必须同步改它。这个命令只改入口规则，**不重建隧道、不换令牌**，
  * 所以对方不用重新填。
  *
@@ -115,7 +115,7 @@ async function lookupByHostname(accountId, hostname) {
   console.log(`入口已更新：${target.hostname}`);
   console.log(`  ${before}  →  ${service}`);
   console.log('\n隧道没重建、令牌没变，对方不用重新填。');
-  console.log('记得把程序「设置与网络 → 服务端口」也改成同一个值，然后重启程序。');
+  console.log('程序端口是固定的 ' + port + '，不用改；重启程序即可生效。');
 })().catch((e) => {
   console.error('\n失败:', e.message);
   process.exitCode = 1;
