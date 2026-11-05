@@ -1303,18 +1303,24 @@ async fn bind_host() -> String {
 
 async fn bind_port(preferred: u16) -> std::io::Result<tokio::net::TcpListener> {
     let host = bind_host().await;
+    // 优先用配置的端口；不行再试一段高位端口（避开 Windows 常保留的 7000–9000）；
+    // 最后才交给系统随机分配。高位这一段很关键：随机端口会让二维码、投屏材料和
+    // 隧道入口每次都变。
+    let mut candidates: Vec<u16> = Vec::new();
     if preferred != 0 {
-        for offset in 0..20u16 {
-            let port = preferred.saturating_add(offset);
-            if port == 0 || !port_usable(port).await {
-                continue;
-            }
-            if let Ok(l) = tokio::net::TcpListener::bind((host.as_str(), port)).await {
-                return Ok(l);
-            }
+        candidates.extend((0..20u16).map(|offset| preferred.saturating_add(offset)));
+    }
+    candidates.extend((0..20u16).map(|offset| 18080 + offset));
+
+    for port in candidates {
+        if port == 0 || !port_usable(port).await {
+            continue;
+        }
+        if let Ok(l) = tokio::net::TcpListener::bind((host.as_str(), port)).await {
+            return Ok(l);
         }
     }
-    // 全被占用（或测试要求）：交给系统分配
+    // 实在都被占：交给系统分配
     tokio::net::TcpListener::bind((host.as_str(), 0)).await
 }
 

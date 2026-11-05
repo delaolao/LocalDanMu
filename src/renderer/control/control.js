@@ -260,7 +260,18 @@
     const words = (cfg.customWords || '').split(/[\r\n,，、;；]+/).filter((w) => w.trim());
     setText('wordCount', words.length ? `${words.length} 个自定义词` : '自定义词 0');
 
-    renderWarnings(next.warnings);
+    // 端口对不上时单独提示：网络检测会覆盖后端 warnings，这里按状态现算
+    const warnList = Array.isArray(next.warnings) ? next.warnings.slice() : [];
+    if (cfg.port && next.port && Number(cfg.port) !== Number(next.port)) {
+      warnList.push({
+        level: 'error',
+        text:
+          '端口 ' + cfg.port + ' 用不了，服务已改用 ' + next.port +
+          '（已记住，下次沿用）；如果用固定隧道，请把隧道入口也改成 ' + next.port,
+        hint: '设置与网络 → 服务端口'
+      });
+    }
+    renderWarnings(warnList);
     renderDisplays(next.displays, next.selectedDisplay);
     renderNics(next.nics, next.ip);
 

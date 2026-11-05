@@ -68,7 +68,9 @@ pub const FILTER_LEVELS: [&str; 3] = ["off", "mark", "block"];
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            port: 8080,
+            // 默认用高位端口：Windows 的保留端口区间（Hyper-V/WSL 动态占用）经常落在
+            // 7000–9000，8080 在不少机器上根本绑不上，会退化成随机端口。
+            port: 18080,
             interval_sec: 5,
             font_px: 38,
             speed: 8,

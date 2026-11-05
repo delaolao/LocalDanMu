@@ -192,13 +192,15 @@ impl AppCore {
         let port = bridge.port;
         // 端口对不上会让固定隧道指向一个没人监听的端口（表现为 502 / 「入口尚未生效」）
         if settings.port != 0 && port != settings.port {
-            self.push_warning(
-                "error",
-                &format!(
-                    "{} 端口用不了，服务已改用 {}；如果用的是固定隧道，请把隧道入口也改成 {}",
-                    settings.port, port, port
-                ),
-            );
+            // 端口没绑上就退到了别的端口。把它记下来，下次启动继续用同一个，
+            // 否则每次启动端口都在变——二维码、投屏材料、隧道入口全都对不上。
+            let _ = self.settings.set(&serde_json::json!({ "port": port }));
+            // 提示交给前端算（network 警告会覆盖这里 push 的内容）：
+            // 面板直接比较「配置端口」与「实际端口」再显示。
+            crate::core::probe_log(&format!(
+                "start_session: 端口 {} 不可用，已改用 {} 并写回设置",
+                settings.port, port
+            ));
         }
         let url = bridge.url(&ip);
         {
