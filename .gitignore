@@ -24,3 +24,6 @@ desktop.ini
 
 # TENANT：租户记录（含隧道 ID 等敏感信息，不进仓库）
 tools/tenant/tenants.json
+
+# TENANT：recover.js 生成的备份
+tools/tenant/tenants.json.bak-*
