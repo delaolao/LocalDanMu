@@ -83,6 +83,16 @@ node tools/tenant/provision.js --label "张三-2026春季" --host u7f3k2
 
 把这两行私聊发给对方，让他填进「设置与网络 → 固定隧道」。
 
+## 查隧道令牌
+
+```powershell
+node tools/tenant/token.js --host syklong.teachergeng.space
+```
+
+输出该隧道的 `eyJ...` 令牌（讲师填进程序的那串）。台账里没有时会按域名去 Cloudflare 反查。
+
+> 也可以到控制台看：Zero Trust → Networks → Tunnels → 该隧道 → 详情页的 connector 安装命令里带 `--token`。
+
 ## 改服务端口（不重建隧道）
 
 固定隧道的入口规则（Public Hostname → `http://localhost:18080`）存在 Cloudflare 侧，
