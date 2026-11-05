@@ -48,8 +48,8 @@ function run(script, args) {
   check('创建了隧道', mock.state.hits.some((h) => h.method === 'POST' && h.url.endsWith('/cfd_tunnel')));
   const ingress = mock.state.hits.find((h) => h.method === 'PUT' && h.url.includes('/configurations'));
   check(
-    '入口规则指向 http://localhost:8080',
-    Boolean(ingress) && ingress.body.config.ingress[0].service === 'http://localhost:8080'
+    '入口规则指向 http://localhost:18080',
+    Boolean(ingress) && ingress.body.config.ingress[0].service === 'http://localhost:18080'
   );
   check(
     '入口规则主机名正确',
