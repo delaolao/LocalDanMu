@@ -64,7 +64,8 @@ function randomSuffix(len = 6) {
   // 想要分组前缀，得买 Advanced Certificate Manager 签发 `*.dm.zone`。
   const hostname = sub.includes('.') ? sub : `${sub}.${zoneName}`;
   const dryRun = has('dry-run');
-  const servicePort = Number(arg('port', '8080'));
+  // 程序端口是固定的 18080（见 src-tauri/src/server.rs 的 SERVICE_PORT）
+  const servicePort = Number(arg('port', '18080'));
   if (!Number.isInteger(servicePort) || servicePort < 1024 || servicePort > 65535) {
     console.error('--port 要在 1024–65535 之间');
     process.exitCode = 1;

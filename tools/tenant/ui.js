@@ -28,7 +28,7 @@ const TOKEN_FILE = path.join(
 );
 
 const ZONE_NAME = process.env.CF_ZONE_NAME || 'teachergeng.space';
-const SERVICE = 'http://localhost:8080';
+const SERVICE = 'http://localhost:18080';
 
 function savedToken() {
   try {
@@ -112,7 +112,8 @@ async function provision(label, host, port) {
     throw new Error('域名标识只能用字母数字和连字符，且不能以连字符开头');
   }
   const hostname = `${sub}.${ZONE_NAME}`;
-  const servicePort = Number(port) || 8080;
+  // 程序端口固定 18080，这里默认跟随；一般不需要改
+  const servicePort = Number(port) || 18080;
   if (!Number.isInteger(servicePort) || servicePort < 1024 || servicePort > 65535) {
     throw new Error('服务端口要在 1024–65535 之间');
   }
@@ -322,8 +323,8 @@ const PAGE = `<!doctype html>
   <div class="card">
     <h2>② 开通新讲师</h2>
     <p class="hint">标签只给自己看（方便回头找人）；域名标识会拼成 <code>&lt;标识&gt;.teachergeng.space</code>，可以改。</p>
-    <p class="hint" style="color:var(--warn)">服务端口默认 8080。如果对方电脑上 8080 用不了（比如被系统保留），
-      要在这里和程序设置里填同一个别的端口（如 18080）。</p>
+    <p class="hint" style="color:var(--warn)">程序固定监听 18080，这里默认跟随。
+      程序固定用 18080，这里一般不用动。</p>
     <label>标签</label>
     <input id="label" placeholder="例如：张三-2026春季">
     <label>域名标识</label>
@@ -332,7 +333,7 @@ const PAGE = `<!doctype html>
       <button class="ghost" id="regen" title="换一个随机标识">🎲 换一个</button>
     </div>
     <label>服务端口（要和程序「设置与网络 → 服务端口」一致）</label>
-    <input id="port" type="number" min="1024" max="65535" value="8080">
+    <input id="port" type="number" min="1024" max="65535" value="18080">
     <div class="preview" id="preview">—</div>
     <div style="margin-top:14px"><button id="go">开通</button></div>
 

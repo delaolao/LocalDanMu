@@ -1,4 +1,4 @@
-﻿//! 会话与状态中枢：把「服务端 <-> 窗口」粘起来的那一层。
+//! 会话与状态中枢：把「服务端 <-> 窗口」粘起来的那一层。
 //!
 //! 对应旧版 `main.js` 里除窗口管理以外的部分：
 //! 历史（仅内存）、会话生命周期、网络重算、二维码刷新、状态推送、点赞复现。
@@ -19,6 +19,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::network;
 use crate::qr;
+use crate::server::SERVICE_PORT;
 use crate::server::{Bridge, BridgeConfig, MessageSink, Outgoing, ServerState, Signals};
 use crate::settings::{settings_to_json, Store};
 
@@ -106,6 +107,107 @@ pub struct AppCore {
     tunnel: Arc<crate::tunnel::Tunnel>,
 }
 
+/// 占着端口的进程是谁——只结束我们自己的残留进程。
+///
+/// 返回 true 表示已经处理掉了。别人的进程一律不动：那可能是讲师正在用的软件，
+/// 悄悄杀掉比启动失败更糟。
+fn kill_stale_owner(port: u16) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let Ok(out) = std::process::Command::new("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let needle = format!("127.0.0.1:{port}");
+    let Some(line) = text
+        .lines()
+        .find(|l| l.contains(&needle) && l.contains("LISTENING"))
+    else {
+        return false;
+    };
+    let Some(pid) = line
+        .split_whitespace()
+        .last()
+        .and_then(|s| s.parse::<u32>().ok())
+    else {
+        return false;
+    };
+    if pid == std::process::id() {
+        return false;
+    }
+    let info = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase())
+        .unwrap_or_default();
+    if !info.contains("localdanmu") {
+        return false;
+    }
+    crate::core::probe_log(&format!(
+        "start_session: 端口 {port} 被旧进程 {pid} 占着，结束它"
+    ));
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    true
+}
+
+/// 端口被占用时，尽量告诉用户是谁占的
+fn port_owner_hint(port: u16) -> String {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let Ok(out) = std::process::Command::new("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    else {
+        return String::new();
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let needle = format!("127.0.0.1:{port}");
+    let Some(line) = text
+        .lines()
+        .find(|l| l.contains(&needle) && l.contains("LISTENING"))
+    else {
+        return String::new();
+    };
+    let Some(pid) = line.split_whitespace().last() else {
+        return String::new();
+    };
+    let name = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let name = name
+        .split(',')
+        .next()
+        .unwrap_or("")
+        .trim_matches('"')
+        .to_string();
+    format!("（占用者：{name}，PID {pid}）")
+}
+
+fn port_busy_message(port: u16) -> String {
+    format!(
+        "{port} 端口被占用{}，服务起不来。请关掉占用它的程序后重试；\
+         如果是本程序残留，在任务管理器里结束 LocalDanMu 即可。",
+        port_owner_hint(port)
+    )
+}
+
+fn port_busy_message_with(port: u16, err: &str) -> String {
+    format!("{port} 端口仍然不可用：{err}")
+}
 impl AppCore {
     pub fn new(
         settings: Arc<Store>,
@@ -170,38 +272,40 @@ impl AppCore {
         let picked = network::pick(settings.preferred_ip.as_deref());
         let ip = picked.address.to_string();
 
-        let filter =
-            crate::filter::Filter::from_settings(&settings.filter_level, &settings.custom_words);
-
         let sink: Arc<dyn MessageSink> = Arc::new(CoreSink {
             app: app_handle(),
             core: Arc::clone(self),
         });
 
-        let bridge = Bridge::start(BridgeConfig {
+        // 端口定死：隧道入口在 Cloudflare 侧是常量，本机换端口就必然对不上。
+        // 被占用时先看是不是自己上一次没退干净，是就收拾掉再绑。
+        let build = |sink: Arc<dyn MessageSink>| BridgeConfig {
             token: token.clone(),
             interval_sec: settings.interval_sec,
-            filter: Some(filter),
+            filter: Some(crate::filter::Filter::from_settings(
+                &settings.filter_level,
+                &settings.custom_words,
+            )),
             sink,
-            preferred_port: settings.port,
+            port: SERVICE_PORT,
             remote_key: Arc::clone(&self.remote_key),
-        })
-        .await
-        .map_err(|e| format!("服务启动失败：{e}"))?;
+        };
+
+        let bridge = match Bridge::start(build(Arc::clone(&sink))).await {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                if !kill_stale_owner(SERVICE_PORT) {
+                    return Err(port_busy_message(SERVICE_PORT));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                Bridge::start(build(sink))
+                    .await
+                    .map_err(|e| port_busy_message_with(SERVICE_PORT, &e.to_string()))?
+            }
+            Err(e) => return Err(format!("服务启动失败：{e}")),
+        };
 
         let port = bridge.port;
-        // 端口对不上会让固定隧道指向一个没人监听的端口（表现为 502 / 「入口尚未生效」）
-        if settings.port != 0 && port != settings.port {
-            // 端口没绑上就退到了别的端口。把它记下来，下次启动继续用同一个，
-            // 否则每次启动端口都在变——二维码、投屏材料、隧道入口全都对不上。
-            let _ = self.settings.set(&serde_json::json!({ "port": port }));
-            // 提示交给前端算（network 警告会覆盖这里 push 的内容）：
-            // 面板直接比较「配置端口」与「实际端口」再显示。
-            crate::core::probe_log(&format!(
-                "start_session: 端口 {} 不可用，已改用 {} 并写回设置",
-                settings.port, port
-            ));
-        }
         let url = bridge.url(&ip);
         {
             let mut s = self.session.lock().map_err(|_| "会话状态损坏")?;

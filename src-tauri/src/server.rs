@@ -1176,13 +1176,19 @@ async fn handle_react(socket: &mut WebSocket, st: &ServerState, ip: IpAddr, msg:
 
 /* ------------------------------------------------------------------ Bridge */
 
+/// 固定服务端口。隧道入口写死在这个端口上，所以它不能变。
+pub const SERVICE_PORT: u16 = 18080;
+
 pub struct BridgeConfig {
     pub token: String,
     pub interval_sec: u32,
     pub filter: Option<Filter>,
     pub sink: Arc<dyn MessageSink>,
-    /// 0 表示让系统分配端口（测试用）
-    pub preferred_port: u16,
+    /// 0 表示让系统分配端口（仅测试用）
+    ///
+    /// 生产固定 18080：隧道入口在 Cloudflare 侧是常量，本机端口也必须是常量，
+    /// 否则二维码、投屏材料和隧道入口全都会对不上。
+    pub port: u16,
     /// 远程模式（隧道）的端到端密钥；None 时一切照旧走明文
     pub remote_key: crate::crypto::RemoteKey,
 }
@@ -1233,7 +1239,7 @@ impl Bridge {
             .route("/ws", get(ws_handler))
             .with_state(state.clone());
 
-        let listener = bind_port(cfg.preferred_port).await?;
+        let listener = bind_exact(cfg.port).await?;
         let port = listener.local_addr()?.port();
 
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
@@ -1301,27 +1307,12 @@ async fn bind_host() -> String {
     std::env::var("LDM_BIND").unwrap_or_else(|_| "0.0.0.0".to_string())
 }
 
-async fn bind_port(preferred: u16) -> std::io::Result<tokio::net::TcpListener> {
+async fn bind_exact(port: u16) -> std::io::Result<tokio::net::TcpListener> {
     let host = bind_host().await;
-    // 优先用配置的端口；不行再试一段高位端口（避开 Windows 常保留的 7000–9000）；
-    // 最后才交给系统随机分配。高位这一段很关键：随机端口会让二维码、投屏材料和
-    // 隧道入口每次都变。
-    let mut candidates: Vec<u16> = Vec::new();
-    if preferred != 0 {
-        candidates.extend((0..20u16).map(|offset| preferred.saturating_add(offset)));
-    }
-    candidates.extend((0..20u16).map(|offset| 18080 + offset));
-
-    for port in candidates {
-        if port == 0 || !port_usable(port).await {
-            continue;
-        }
-        if let Ok(l) = tokio::net::TcpListener::bind((host.as_str(), port)).await {
-            return Ok(l);
-        }
-    }
-    // 实在都被占：交给系统分配
-    tokio::net::TcpListener::bind((host.as_str(), 0)).await
+    // 只绑这一个端口。换端口会让二维码、投屏材料和 Cloudflare 隧道入口全部对不上，
+    // 所以宁可启动失败（由上层去清理占用），也不偷偷换一个。
+    let _ = port_usable;
+    tokio::net::TcpListener::bind((host.as_str(), port)).await
 }
 
 /* -------------------------------------------------------------------- 测试 */
@@ -1386,7 +1377,7 @@ mod tests {
             interval_sec: 5,
             filter: Some(Filter::new(Level::Block, "")),
             sink: sink.clone(),
-            preferred_port: 0,
+            port: 0,
             remote_key: crate::crypto::new_slot(),
         })
         .await
