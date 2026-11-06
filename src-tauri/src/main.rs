@@ -1,4 +1,4 @@
-﻿//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
+//! 主程序：生命周期、窗口编排、IPC 命令、托盘、快捷键。
 //!
 //! 对应旧版 `src/main/main.js`。这里只做**编排**，业务都在各模块里：
 //! - `settings`  设置项持久化（白名单 + 防抖落盘 + 便携模式）
@@ -95,6 +95,8 @@ fn main() {
             join_close,
             dm_hover,
             dm_modal,
+            danmaku_focus,
+            danmaku_unpin,
             dm_ready,
             tunnel_start,
             tunnel_stop,
@@ -1089,6 +1091,25 @@ fn dm_modal(app: AppHandle, open: bool) -> bool {
         sys::apply_overlay_style(h, open);
     }
     true
+}
+
+/// 面板「最近弹幕」点选：让弹幕层把这一条强调出来。
+#[tauri::command]
+fn danmaku_focus(app: AppHandle, seq: u64) -> bool {
+    if let Some(w) = app.get_webview_window(OVERLAY) {
+        let _ = w.emit("dm:cmd", json!({ "type": "focus", "seq": seq }));
+        return true;
+    }
+    false
+}
+
+#[tauri::command]
+fn danmaku_unpin(app: AppHandle) -> bool {
+    if let Some(w) = app.get_webview_window(OVERLAY) {
+        let _ = w.emit("dm:cmd", json!({ "type": "unpin" }));
+        return true;
+    }
+    false
 }
 
 /// 弹幕层渲染就绪：补推一次配置与暂停状态（旧版 `dm:ready`）。

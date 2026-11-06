@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 弹幕渲染层
@@ -30,6 +30,10 @@
   let pending = [];
   let layout = null;
   let hoverItem = null;
+  // 被点中「强调」的那条：从滚动层提取出来，固定在底部显示一段时间
+  let pinnedItem = null;
+  let pinnedAt = 0;
+  const PIN_MS = 15000;
   let modalItem = null;
   let modalOpenedAt = 0;
   let lastPointer = null;
@@ -280,6 +284,20 @@
       ctx.font = item.font;
     }
 
+    // 悬停高亮：描一圈薄荷色 + 浅底，提示"这条可以点"
+    if (item === hoverItem) {
+      const padX = Math.max(6, fontPx * 0.18);
+      const padY = Math.max(4, fontPx * 0.12);
+      ctx.save();
+      ctx.fillStyle = 'rgba(6, 22, 18, 0.55)';
+      roundRect(item.x - padX, item.y - padY, item.w + padX * 2, item.h + padY * 2, 10);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(52, 211, 153, 0.95)';
+      ctx.lineWidth = Math.max(2, fontPx * 0.05);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // 高赞复现：右上角打一个「共鸣」小标，让观众知道这条是被顶回来的
     if (item.replay) {
       const fs = Math.max(11, Math.round(fontPx * 0.4));
@@ -345,10 +363,9 @@
   /** 鼠标压到图片上才接管点击，其余位置保持穿透。命中区域外扩 16px，好点。 */
   const HIT_PAD = 16;
 
-  function imageAt(x, y, pad) {
+  function itemAt(x, y, pad) {
     for (let i = items.length - 1; i >= 0; i -= 1) {
       const it = items[i];
-      if (it.kind !== 'image') continue;
       if (x >= it.x - pad && x <= it.x + it.w + pad && y >= it.y - pad && y <= it.y + it.h + pad) return it;
     }
     return null;
@@ -364,11 +381,11 @@
       clearTimeout(hoverTimer);
       hoverTimer = null;
     }
-    if (target) {
-      // 停 120ms 再冻结：鼠标只是路过时不会把画面定住
+    if (target && target.kind === 'image') {
+      // 只有图片需要冻结：文字悬停只做高亮，不该把整层弹幕定住
       hoverTimer = setTimeout(() => {
         hoverTimer = null;
-        if (hoverItem) hoverFreeze = true;
+        if (hoverItem && hoverItem.kind === 'image') hoverFreeze = true;
       }, 120);
     } else {
       hoverFreeze = false;
@@ -377,7 +394,7 @@
 
   function updateHover(x, y) {
     if (modalItem) return;
-    setHoverTarget(imageAt(x, y, HIT_PAD));
+    setHoverTarget(itemAt(x, y, HIT_PAD));
   }
 
   /**
@@ -394,6 +411,71 @@
       lastPointer.y <= it.y + it.h + HIT_PAD;
     if (inside) return;
     setHoverTarget(null);
+  }
+
+  /** 点中某条文字：提取到底部强调条，不再随滚动消失 */
+  function pinItem(item) {
+    if (!item || item.kind !== 'text') return;
+    if (pinnedItem && pinnedItem.seq === item.seq && item.seq !== undefined) {
+      unpin();
+      return;
+    }
+    pinnedItem = item;
+    pinnedAt = performance.now();
+  }
+
+  function unpin() {
+    pinnedItem = null;
+    pinnedAt = 0;
+  }
+
+  /** 底部强调条：半透明深底 + 薄荷描边，15 秒后淡出 */
+  function drawPinned() {
+    if (!pinnedItem) return;
+    const age = performance.now() - pinnedAt;
+    if (age > PIN_MS) {
+      unpin();
+      return;
+    }
+    // 进出各 250ms 的透明度过渡，避免硬切
+    let alpha = 1;
+    if (age < 250) alpha = age / 250;
+    else if (age > PIN_MS - 600) alpha = Math.max(0, (PIN_MS - age) / 600);
+
+    const fs = Math.round(fontPx * 1.15);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `700 ${fs}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+    const maxW = W * 0.86;
+    let text = pinnedItem.text;
+    if (ctx.measureText(text).width > maxW) {
+      while (text.length > 1 && ctx.measureText(text + '…').width > maxW) {
+        text = text.slice(0, -1);
+      }
+      text += '…';
+    }
+    const tw = ctx.measureText(text).width;
+    const padX = fs * 0.9;
+    const padY = fs * 0.55;
+    const bw = Math.min(W - 40, tw + padX * 2);
+    const bh = fs + padY * 2;
+    const bx = (W - bw) / 2;
+    const by = H - bh - Math.round(H * 0.08);
+
+    ctx.fillStyle = 'rgba(6, 16, 14, 0.82)';
+    roundRect(bx, by, bw, bh, bh / 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(52, 211, 153, 0.95)';
+    ctx.lineWidth = Math.max(2, fs * 0.06);
+    ctx.stroke();
+
+    ctx.fillStyle = pinnedItem.color || '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, W / 2, by + bh / 2);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
   }
 
   function drawModal() {
@@ -461,6 +543,7 @@
 
     ctx.clearRect(0, 0, W, H);
     for (const item of items) drawItem(item);
+    drawPinned();
     if (modalItem) drawModal();
 
     requestAnimationFrame(frame);
@@ -504,6 +587,13 @@
     else if (cmd.type === 'clear') clear();
     else if (cmd.type === 'closeModal') closeModal();
     else if (cmd.type === 'config' && cmd.config) applyConfig(cmd.config);
+    else if (cmd.type === 'focus' && typeof cmd.seq === 'number') {
+      // 面板「最近弹幕」点选：按 seq 找到屏上那条并强调，找不到就忽略
+      const target = items.concat(pending).find((it) => it.seq === cmd.seq);
+      if (target && target.kind === 'text') pinItem(target);
+    } else if (cmd.type === 'unpin') {
+      unpin();
+    }
   }
 
   window.addEventListener('resize', resize, { passive: true });
@@ -544,8 +634,9 @@
       closeModal();
       return;
     }
-    const hit = imageAt(x, y, 8);
-    if (hit) openModal(hit);
+    const hit = itemAt(x, y, 8);
+    if (hit && hit.kind === 'image') openModal(hit);
+    else if (hit) pinItem(hit);
   }
 
   window.addEventListener('click', (event) => {
@@ -577,6 +668,14 @@
     },
     hovering() {
       return Boolean(hoverItem);
+    },
+    pinned() {
+      return pinnedItem ? { seq: pinnedItem.seq, text: pinnedItem.text } : null;
+    },
+    texts() {
+      return items
+        .filter((it) => it.kind === 'text')
+        .map((it) => ({ seq: it.seq, x: it.x, y: it.y, w: it.w, h: it.h, text: it.text }));
     }
   };
 

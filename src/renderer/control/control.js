@@ -81,12 +81,24 @@
         item.contentType === 'image' ? '［图片］' : (item.flagged ? '⚠ ' : '') + (item.text || '');
       row.appendChild(text);
 
+      const focus = document.createElement('button');
+      focus.className = 'log-replay';
+      focus.type = 'button';
+      focus.title = '投屏上强调这一条（15 秒）';
+      focus.textContent = '◎';
+      focus.addEventListener('click', (event) => {
+        event.stopPropagation();
+        api.focusDanmaku(item.seq).then((ok) => toast(ok ? '已在投屏上强调' : '这条已经滚过去了'));
+      });
+      row.appendChild(focus);
+
       const replay = document.createElement('button');
       replay.className = 'log-replay';
       replay.type = 'button';
       replay.title = '重新上屏';
       replay.textContent = '↻';
-      replay.addEventListener('click', () => {
+      replay.addEventListener('click', (event) => {
+        event.stopPropagation();
         api.replay(item.seq).then((ok) => toast(ok ? '已重新上屏' : '这条已经不在了'));
       });
       row.appendChild(replay);

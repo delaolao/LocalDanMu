@@ -1,4 +1,4 @@
-/* eslint-disable */
+﻿/* eslint-disable */
 /**
  * Tauri 兼容层（兼容层，不是框架）。
  *
@@ -92,6 +92,12 @@
     },
     replay: function (seq) {
       return invoke('session_replay', { seq: Number(seq) });
+    },
+    focusDanmaku: function (seq) {
+      return invoke('danmaku_focus', { seq: Number(seq) });
+    },
+    unpinDanmaku: function () {
+      return invoke('danmaku_unpin');
     },
     onItem: function (cb) {
       listen('dm:item', cb);
