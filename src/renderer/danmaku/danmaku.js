@@ -32,6 +32,14 @@
   let hoverItem = null;
   // 被点中「强调」的那条：从滚动层提取出来，固定在底部显示一段时间
   let pinnedItem = null;
+  // 悬停浮起：按住 250ms 后把这条"提"到光标附近，其它条目照常滚
+  let liftItem = null;
+  let liftPointer = null;
+  let liftTimer = null;
+  let liftReleaseTimer = null;
+  const LIFT_DELAY = 250;
+  const LIFT_RELEASE = 1200;
+  const LIFT_SCALE = 1.35;
   let pinnedAt = 0;
   const PIN_MS = 15000;
   let modalItem = null;
@@ -409,7 +417,48 @@
 
   function updateHover(x, y) {
     if (modalItem) return;
-    setHoverTarget(itemAt(x, y, HIT_PAD));
+    if (liftPointer) liftPointer = { x, y };
+    const hit = itemAt(x, y, HIT_PAD);
+    setHoverTarget(hit);
+
+    // 文字：停留 250ms 才浮起，避免鼠标划过就飞起来
+    if (hit && hit.kind === 'text') {
+      if (liftReleaseTimer) {
+        clearTimeout(liftReleaseTimer);
+        liftReleaseTimer = null;
+      }
+      if (liftItem !== hit && !liftTimer) {
+        liftTimer = setTimeout(() => {
+          liftTimer = null;
+          if (hoverItem === hit) beginLift(hit);
+        }, LIFT_DELAY);
+      }
+    } else if (liftTimer) {
+      clearTimeout(liftTimer);
+      liftTimer = null;
+    }
+
+    if (liftItem && hit !== liftItem) scheduleRelease();
+  }
+
+  function beginLift(item) {
+    if (liftItem === item) return;
+    liftItem = item;
+    liftPointer = lastPointer ? { x: lastPointer.x, y: lastPointer.y } : null;
+    if (liftReleaseTimer) {
+      clearTimeout(liftReleaseTimer);
+      liftReleaseTimer = null;
+    }
+  }
+
+  /** 移开 1.2 秒才落回，防止鼠标抖一下条目就掉下去 */
+  function scheduleRelease() {
+    if (!liftItem || liftReleaseTimer) return;
+    liftReleaseTimer = setTimeout(() => {
+      liftReleaseTimer = null;
+      liftItem = null;
+      liftPointer = null;
+    }, LIFT_RELEASE);
   }
 
   /**
@@ -442,6 +491,50 @@
   function unpin() {
     pinnedItem = null;
     pinnedAt = 0;
+  }
+
+  /** 浮起层：放大 1.35×、半透明，跟在光标旁边 */
+  function drawLifted() {
+    if (!liftItem) return;
+    const item = liftItem;
+    const scale = LIFT_SCALE;
+    const fs = Math.round(fontPx * scale);
+    const text = item.text;
+    ctx.save();
+    ctx.font = `700 ${fs}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+    const tw = ctx.measureText(text).width;
+    const padX = fs * 0.5;
+    const padY = fs * 0.3;
+    const bw = tw + padX * 2;
+    const bh = fs + padY * 2;
+
+    // 跟着光标走：默认在右下方，靠近屏幕边缘时翻到另一侧
+    const p = liftPointer || { x: W / 2, y: H / 2 };
+    let bx = p.x + 24;
+    let by = p.y + 18;
+    if (bx + bw > W - 12) bx = p.x - bw - 24;
+    if (by + bh > H - 12) by = p.y - bh - 18;
+    bx = Math.max(12, Math.min(W - bw - 12, bx));
+    by = Math.max(12, Math.min(H - bh - 12, by));
+
+    ctx.globalAlpha = 0.92;
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = 'rgba(6, 16, 14, 0.78)';
+    roundRect(bx, by, bw, bh, bh / 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(52, 211, 153, 0.95)';
+    ctx.lineWidth = Math.max(2, fs * 0.05);
+    ctx.stroke();
+
+    ctx.fillStyle = item.color || '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, bx + bw / 2, by + bh / 2);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
   }
 
   /** 底部强调条：半透明深底 + 薄荷描边，15 秒后淡出 */
@@ -536,7 +629,11 @@
     lastTs = ts;
 
     if (!paused && !modalItem && !hoverFreeze) {
-      for (const item of items) item.x -= item.speed * dt;
+      for (const item of items) {
+        // 被「提」在手里那条原地不动，松手后从原位置继续滚
+        if (item === liftItem) continue;
+        item.x -= item.speed * dt;
+      }
       if (items.length) items = items.filter((item) => item.x + item.w > -80);
 
       let spawned = 0;
@@ -559,7 +656,12 @@
     revalidateHover();
 
     ctx.clearRect(0, 0, W, H);
-    for (const item of items) drawItem(item);
+    for (const item of items) {
+      // 手里举着的那条单独画（放大 + 跟随光标）
+      if (item === liftItem) continue;
+      drawItem(item);
+    }
+    drawLifted();
     drawPinned();
     if (modalItem) drawModal();
 
@@ -657,6 +759,18 @@
       closeModal();
       return;
     }
+    if (liftItem) {
+      // 手里举着一条：这一下就是"放下并固定"
+      const held = liftItem;
+      liftItem = null;
+      liftPointer = null;
+      if (liftReleaseTimer) {
+        clearTimeout(liftReleaseTimer);
+        liftReleaseTimer = null;
+      }
+      pinItem(held);
+      return;
+    }
     const hit = itemAt(x, y, 8);
     if (hit && hit.kind === 'image') openModal(hit);
     else if (hit) pinItem(hit);
@@ -691,6 +805,9 @@
     },
     hovering() {
       return Boolean(hoverItem);
+    },
+    lifted() {
+      return liftItem ? { seq: liftItem.seq, text: liftItem.text } : null;
     },
     pinned() {
       return pinnedItem ? { seq: pinnedItem.seq, text: pinnedItem.text } : null;
