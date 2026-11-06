@@ -162,11 +162,24 @@
     img.src = payload;
   }
 
+  // 最近 60 条文字的内容：面板点「◎」时，哪怕这条已经滚出屏幕，也能重新强调
+  const recentTexts = new Map();
+
   function onItem(msg) {
     if (!msg || !msg.payload) return;
     const meta = { seq: msg.seq, likes: msg.likes || 0, replay: msg.replay };
-    if (msg.contentType === 'image') buildImage(msg.payload, meta);
-    else buildText(String(msg.payload), msg.color, meta);
+    if (msg.contentType === 'image') {
+      buildImage(msg.payload, meta);
+    } else {
+      const text = String(msg.payload);
+      buildText(text, msg.color, meta);
+      if (typeof msg.seq === 'number') {
+        recentTexts.set(msg.seq, { text, color: msg.color });
+        if (recentTexts.size > 60) {
+          recentTexts.delete(recentTexts.keys().next().value);
+        }
+      }
+    }
   }
 
   /** 主进程推来的点赞数：更新屏上这一条（以及还在排队的那条） */
@@ -592,9 +605,15 @@
     else if (cmd.type === 'closeModal') closeModal();
     else if (cmd.type === 'config' && cmd.config) applyConfig(cmd.config);
     else if (cmd.type === 'focus' && typeof cmd.seq === 'number') {
-      // 面板「最近弹幕」点选：按 seq 找到屏上那条并强调，找不到就忽略
+      // 面板「最近弹幕」点选：优先用屏上那条；已经滚过去了就用缓存重建，
+      // 否则讲师点「◎」会毫无反应（这是上一版的 bug）。
       const target = items.concat(pending).find((it) => it.seq === cmd.seq);
-      if (target && target.kind === 'text') pinItem(target);
+      if (target && target.kind === 'text') {
+        pinItem(target);
+      } else {
+        const cached = recentTexts.get(cmd.seq);
+        if (cached) pinItem({ kind: 'text', text: cached.text, color: cached.color, seq: cmd.seq });
+      }
     } else if (cmd.type === 'unpin') {
       unpin();
     }
