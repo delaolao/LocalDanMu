@@ -1,4 +1,4 @@
-# 培训弹幕 v0.5.6（本地版 · Tauri）
+﻿# 培训弹幕 v0.5.6（本地版 · Tauri）
 
 线下培训用的弹幕系统：讲师在自己电脑上开一个窗口，观众扫码进入网页发文字/图片，内容实时飘在 PPT 上方；需要看整体意见分布时，一键切到「词云」大屏。
 
@@ -186,6 +186,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-win.ps1
 
 ---
 
+
 ## 三点五、给别人用：多讲师开通（TENANT）
 
 > 这一节是给**分发者**看的。普通讲师只用上一节就够了。
@@ -279,6 +280,13 @@ node tools/tenant/revoke.js --label "张三-2026春季"      # 吊销（删 DNS 
 
 操作细节见 [tools/tenant/README.md](tools/tenant/README.md)，长期规划见
 [docs/topic-tenant.md](docs/topic-tenant.md)。
+
+## 三点六、演练与验收（建议先做）
+
+正式发给同事前，按 [docs/field-trial/README.md](docs/field-trial/README.md) 走一遍：
+课前清单、现场记录表、事先定死的判据（首次进入率 / 远程启用率 / 阻塞时长）。
+
+目的是用真实数据决定"远程模式该不该继续投入"，而不是靠印象。
 
 ---
 
