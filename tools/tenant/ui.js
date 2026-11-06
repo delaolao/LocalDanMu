@@ -332,7 +332,7 @@ const PAGE = `<!doctype html>
       <input id="host" placeholder="例如：zhangsan">
       <button class="ghost" id="regen" title="换一个随机标识">🎲 换一个</button>
     </div>
-    <label>服务端口（要和程序「设置与网络 → 服务端口」一致）</label>
+    <label>服务端口（程序固定 18080，一般不用改）</label>
     <input id="port" type="number" min="1024" max="65535" value="18080">
     <div class="preview" id="preview">—</div>
     <div style="margin-top:14px"><button id="go">开通</button></div>

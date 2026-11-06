@@ -498,7 +498,7 @@ main()
  │   ├─ 6. create_tray / register_shortcuts / 托盘 tick
  │   └─ 7. 后台任务：
  │         start_session()
- │           ├─ 固定 18080：先探 127.0.0.1 再绑 0.0.0.0
+ │           ├─ 固定 18080：直接绑 0.0.0.0，失败即报错
  │           ├─ random_token(8)  房间口令
  │           ├─ network::pick()  选网卡
  │           ├─ Bridge::start()  起 HTTP + WS

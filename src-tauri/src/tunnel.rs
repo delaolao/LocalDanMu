@@ -392,6 +392,8 @@ impl Tunnel {
                                             None,
                                             "临时地址已变更，正在重新建立隧道…",
                                         );
+                                        // 和其他 error 分支保持一致：不续连时别把旧连接器留在后台
+                                        me2.drop_child();
                                         me2.schedule_restart();
                                     }
                                 }

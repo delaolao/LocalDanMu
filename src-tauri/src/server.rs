@@ -1202,7 +1202,7 @@ pub struct Bridge {
 }
 
 impl Bridge {
-    /// 起服务。端口被占用时依次尝试 8080..=8099，全被占就交给系统分配。
+    /// 起服务。端口固定（见 [SERVICE_PORT]），绑不上就返回错误，由上层清理占用后重试。
     pub async fn start(cfg: BridgeConfig) -> std::io::Result<Bridge> {
         let inner = Arc::new(Mutex::new(Inner {
             seq: 0,

@@ -375,7 +375,9 @@
     if (target === hoverItem) return;
     hoverItem = target;
     document.body.style.cursor = target ? 'pointer' : 'none';
-    window.dm.hover(Boolean(target));
+    // 只有图片才接管鼠标：文字弹幕悬停只做高亮，点击必须照常落到 PPT 上。
+    // 点击本身由主进程轮询左键得到（dm:click），不依赖接管，所以文字也能点。
+    window.dm.hover(Boolean(target) && target.kind === 'image');
 
     if (hoverTimer) {
       clearTimeout(hoverTimer);
@@ -449,10 +451,12 @@
     const maxW = W * 0.86;
     let text = pinnedItem.text;
     if (ctx.measureText(text).width > maxW) {
-      while (text.length > 1 && ctx.measureText(text + '…').width > maxW) {
-        text = text.slice(0, -1);
+      // 按码点截断：slice 会把 emoji 这类代理对切成两半，显示成乱码
+      const chars = Array.from(text);
+      while (chars.length > 1 && ctx.measureText(chars.join('') + '…').width > maxW) {
+        chars.pop();
       }
-      text += '…';
+      text = chars.join('') + '…';
     }
     const tw = ctx.measureText(text).width;
     const padX = fs * 0.9;
